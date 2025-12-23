@@ -5,7 +5,7 @@ services:
       context: .
       dockerfile: Dockerfile
     ports:
-      - "3370:3000"
+      - "3380:3000"
     networks:
       - app
     restart: always
