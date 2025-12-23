@@ -1,0 +1,27 @@
+html,
+body {
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  margin: 0;
+  overflow: hidden;
+}
+
+/* 4K 세로 디스플레이 최적화 (9:16 비율, 2160x3840) */
+@media (orientation: portrait) {
+  body {
+    /* 세로 모드에서 9:16 비율 유지 */
+    max-width: 2160px;
+    max-height: 3840px;
+  }
+}
+
+/* 브라우저 기본 스크롤 제거 */
+::-webkit-scrollbar {
+  display: none;
+}
+
+* {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}

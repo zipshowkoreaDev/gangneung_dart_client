@@ -14,23 +14,30 @@ const io = new Server(httpServer, {
 });
 
 io.on("connection", (socket) => {
-  console.log("connected:", socket.id);
+  console.log("✅ connected:", socket.id);
 
   socket.on("join-room", ({ room }) => {
     socket.join(room);
-    console.log(`join room: ${room}`);
+    console.log(`🚪 join room: ${room} (socket: ${socket.id})`);
   });
 
   socket.on("aim-update", (data) => {
+    console.log(`🎯 aim-update from ${data.name || data.playerId} in room ${data.room}:`, data.aim);
     socket.to(data.room).emit("aim-update", data);
   });
 
+  socket.on("aim-off", (data) => {
+    console.log(`❌ aim-off from ${data.name || data.playerId} in room ${data.room}`);
+    socket.to(data.room).emit("aim-off", data);
+  });
+
   socket.on("throw", (data) => {
+    console.log(`🎲 throw from ${data.name || data.playerId} in room ${data.room}`);
     socket.to(data.room).emit("throw", data);
   });
 
   socket.on("disconnect", () => {
-    console.log("disconnected:", socket.id);
+    console.log("❌ disconnected:", socket.id);
   });
 });
 
