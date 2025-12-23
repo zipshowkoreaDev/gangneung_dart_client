@@ -67,19 +67,13 @@ export default function DisplayPage() {
     setRoom(createRoom());
   }, []);
 
-  // 2) QR 링크 생성: 도메인/세팅 없으니 아래 우선순위로 결정
-  //    - NEXT_PUBLIC_BASE_URL 있으면 그걸 사용 (예: http://192.168.0.157:3000)
-  //    - 없으면 window.location.origin 사용
-  //    - (정말 필요하면) 마지막에 하드코딩 LAN IP로 교체 가능
+  // 2) QR 링크 생성: 모바일 접속용 IP 사용
   const mobileUrl = useMemo(() => {
     if (!isMounted || !room) return "";
 
-    const base =
-      process.env.NEXT_PUBLIC_BASE_URL?.trim() ||
-      (typeof window !== "undefined" ? window.location.origin : "");
-
-    // 필요 시 하드코딩:
-    // const base = "http://192.168.0.157:3000";
+    // 환경변수에 설정된 IP 사용 (모바일에서 접속 가능한 주소)
+    // .env.local에서 NEXT_PUBLIC_BASE_URL 설정 필요
+    const base = process.env.NEXT_PUBLIC_BASE_URL || "";
 
     return `${base}/mobile?room=${encodeURIComponent(room)}`;
   }, [isMounted, room]);

@@ -1,0 +1,16 @@
+version: "3.8"
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3370:3000"
+    networks:
+      - app
+    restart: always
+
+networks:
+  app:
+    external: true
+    name: app

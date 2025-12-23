@@ -22,17 +22,24 @@ io.on("connection", (socket) => {
   });
 
   socket.on("aim-update", (data) => {
-    console.log(`🎯 aim-update from ${data.name || data.playerId} in room ${data.room}:`, data.aim);
+    console.log(
+      `🎯 aim-update from ${data.name || data.playerId} in room ${data.room}:`,
+      data.aim
+    );
     socket.to(data.room).emit("aim-update", data);
   });
 
   socket.on("aim-off", (data) => {
-    console.log(`❌ aim-off from ${data.name || data.playerId} in room ${data.room}`);
+    console.log(
+      `❌ aim-off from ${data.name || data.playerId} in room ${data.room}`
+    );
     socket.to(data.room).emit("aim-off", data);
   });
 
   socket.on("throw", (data) => {
-    console.log(`🎲 throw from ${data.name || data.playerId} in room ${data.room}`);
+    console.log(
+      `🎲 throw from ${data.name || data.playerId} in room ${data.room}`
+    );
     socket.to(data.room).emit("throw", data);
   });
 
@@ -41,8 +48,8 @@ io.on("connection", (socket) => {
   });
 });
 
-// 모든 네트워크 인터페이스(0.0.0.0)에서 수신
+// 모든 네트워크 인터페이스에서 수신
 httpServer.listen(3001, "0.0.0.0", () => {
-  console.log("Socket server running on 0.0.0.0:3001");
-  console.log("Accessible from network at ws://192.168.0.157:3001");
+  console.log("Socket server running on port 3001");
+  console.log("Listening on all network interfaces (0.0.0.0:3001)");
 });
