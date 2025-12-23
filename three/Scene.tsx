@@ -1,4 +1,5 @@
 import { OrbitControls } from "@react-three/drei";
+import MachineProcedural from "./MachineProcedural";
 import Target from "./Target";
 
 export default function Scene() {
@@ -11,13 +12,20 @@ export default function Scene() {
     "/test/model_3.glb",
   ];
 
-  // 그리드 간격
-  const colSpacing = 3; // 가로 간격
-  const rowSpacing = 4; // 세로 간격
+  // MachineProcedural과 동일한 치수 사용
+  const machineW = 22;
+  const machineH = 40;
+  const frame = 1.2;
+  const innerW = machineW - frame * 2;
+  const innerH = machineH - frame * 2;
 
-  // 중앙 정렬을 위한 오프셋
-  const xOffset = -((cols - 1) * colSpacing) / 2;
-  const yOffset = ((rows - 1) * rowSpacing) / 2;
+  // 격자 칸 크기
+  const cellWidth = innerW / cols;
+  const cellHeight = innerH / rows;
+
+  // 그리드 시작점 (왼쪽 상단)
+  const gridStartX = -innerW / 2;
+  const gridStartY = innerH / 2;
 
   return (
     <>
@@ -41,18 +49,27 @@ export default function Scene() {
       {/* 상단 전체 조명 */}
       <directionalLight position={[0, 20, 15]} intensity={0.5} />
 
+      {/* 머신(배경) */}
+      <MachineProcedural targetZ={0} scale={1} />
+
       {/* 8줄 x 6열 = 48개 모델 렌더링 */}
       {Array.from({ length: rows }).map((_, rowIndex) =>
         Array.from({ length: cols }).map((_, colIndex) => {
-          const x = xOffset + colIndex * colSpacing;
-          const y = yOffset - rowIndex * rowSpacing;
+          // 각 칸의 중심 위치
+          const cellCenterX = gridStartX + cellWidth * (colIndex + 0.5);
+
+          // 각 칸의 바닥 위치 (중력 느낌)
+          const cellBottomY = gridStartY - cellHeight * (rowIndex + 1);
+          // 모델 높이의 절반만큼 위로 올려서 바닥에 닿게 함
+          const y = cellBottomY + 0.8; // 0.8은 모델 높이의 절반 (조정 가능)
+
           const modelIndex = (rowIndex * cols + colIndex) % models.length;
 
           return (
             <Target
               key={`${rowIndex}-${colIndex}`}
               modelPath={models[modelIndex]}
-              position={[x, y, 0]}
+              position={[cellCenterX, y, 0]}
             />
           );
         })
