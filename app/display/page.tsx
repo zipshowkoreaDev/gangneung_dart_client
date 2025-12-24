@@ -177,6 +177,13 @@ export default function DisplayPage() {
 
       setAimPositions((prev) => {
         const next = new Map(prev);
+
+        // 최대 2명까지만 허용
+        if (!prev.has(key) && prev.size >= 2) {
+          addLog(`⚠️ 플레이어 제한: 최대 2명까지만 가능 (${key} 거부됨)`);
+          return prev; // 변경하지 않고 이전 상태 유지
+        }
+
         next.set(key, { x, y, skin: data.skin });
         return next;
       });
