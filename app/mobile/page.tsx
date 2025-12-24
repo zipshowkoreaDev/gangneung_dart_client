@@ -44,6 +44,9 @@ export default function MobilePage() {
   const accPeakRef = useRef(0);
   const gravityZRef = useRef(0);
 
+  // 던지는 순간의 정확한 aim 좌표를 저장
+  const aimRef = useRef({ x: 0, y: 0 });
+
   const handleOrientationRef = useRef<
     ((e: DeviceOrientationEvent) => void) | null
   >(null);
@@ -241,7 +244,10 @@ export default function MobilePage() {
         Math.abs(gravityZRef.current) > 4 && gravityZRef.current < 0;
       const y = faceUp ? y0 : -y0;
 
-      setAim({ x, y });
+      // state와 ref 모두 업데이트 (state는 UI용, ref는 throw 시 사용)
+      const aimValue = { x, y };
+      setAim(aimValue);
+      aimRef.current = aimValue;
       aimReadyRef.current = true;
 
       // 처음 이벤트 발생 로그
@@ -332,20 +338,26 @@ export default function MobilePage() {
     readyRef.current = false;
 
     const power = Math.max(0, Math.min(1, accPeakRef.current / 25));
+    // 던지는 순간의 정확한 aim 좌표 사용
+    const currentAim = aimRef.current;
 
-    addLog(`🎯 다트 던짐! power=${power.toFixed(2)}`);
+    addLog(
+      `🎯 다트 던짐! power=${power.toFixed(2)} aim=(${currentAim.x.toFixed(
+        2
+      )}, ${currentAim.y.toFixed(2)})`
+    );
     socket.emit("throw", {
       room,
       playerId,
       skin,
-      aim,
+      aim: currentAim,
       power,
     });
 
     setStatus(
-      `던짐! power=${power.toFixed(2)} aim=(${aim.x.toFixed(
+      `던짐! power=${power.toFixed(2)} aim=(${currentAim.x.toFixed(
         2
-      )}, ${aim.y.toFixed(2)})`
+      )}, ${currentAim.y.toFixed(2)})`
     );
 
     socket.emit("aim-off", { room, playerId });
