@@ -101,13 +101,21 @@ export default function DisplayPage() {
     }
   }, []);
 
-  // 2) QR 링크 생성: 모바일 접속용 IP 사용
+  // 2) QR 링크 생성: 개발 시 현재 호스트, 프로덕션 도메인 접속 시 환경변수 사용
   const mobileUrl = useMemo(() => {
     if (!isMounted || !room) return "";
 
-    // 환경변수에 설정된 IP 사용 (모바일에서 접속 가능한 주소)
-    // .env.local에서 NEXT_PUBLIC_BASE_URL 설정 필요
-    const base = process.env.NEXT_PUBLIC_BASE_URL || "";
+    // 프로덕션 도메인으로 접속한 경우
+    const isProductionDomain =
+      typeof window !== "undefined" &&
+      process.env.NEXT_PUBLIC_BASE_URL &&
+      window.location.host ===
+        new URL(process.env.NEXT_PUBLIC_BASE_URL).host;
+
+    // 프로덕션 도메인이면 환경변수 사용, 아니면 현재 접속 중인 호스트 사용
+    const base = isProductionDomain
+      ? process.env.NEXT_PUBLIC_BASE_URL || ""
+      : `${window.location.protocol}//${window.location.host}`;
 
     return `${base}/mobile?room=${encodeURIComponent(room)}`;
   }, [isMounted, room]);

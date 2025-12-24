@@ -1,5 +1,5 @@
 import { OrbitControls } from "@react-three/drei";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import MachineProcedural from "./MachineProcedural";
 import Target from "./Target";
 import HitEffect from "./HitEffect";
@@ -23,6 +23,8 @@ export default function Scene() {
   const [hitTargets, setHitTargets] = useState<Set<string>>(new Set());
   // 활성 히트 이펙트 추적
   const [hitEffects, setHitEffects] = useState<HitEffectData[]>([]);
+  // hitTargets의 최신 값을 ref로 추적 (stale closure 방지)
+  const hitTargetsRef = useRef<Set<string>>(new Set());
 
   // MachineProcedural과 동일한 치수 사용
   const machineW = 22;
@@ -39,22 +41,35 @@ export default function Scene() {
   const gridStartX = -innerW / 2;
   const gridStartY = innerH / 2;
 
+  // hitTargets 변경 시 ref 업데이트
+  useEffect(() => {
+    hitTargetsRef.current = hitTargets;
+  }, [hitTargets]);
+
   // DART_THROW 이벤트 리스너 - 히트 감지
   useEffect(() => {
     const handleThrow = (event: Event) => {
       const customEvent = event as CustomEvent;
       const data = customEvent.detail;
 
+      console.log("🎲 DART_THROW 이벤트 수신:", data);
+
       // aim 좌표가 있는지 확인
-      if (!data.aim) return;
+      if (!data.aim) {
+        console.log("⚠️ aim 좌표 없음");
+        return;
+      }
 
       const { x, y } = data.aim; // -1..1 범위
+      console.log("📍 aim 좌표:", { x, y });
 
       // aim 좌표를 그리드 인덱스로 변환
       // x: -1(왼쪽) ~ 1(오른쪽) → 0 ~ cols-1
       // y: -1(위) ~ 1(아래) → 0 ~ rows-1
       const colIndex = Math.floor(((x + 1) / 2) * cols);
       const rowIndex = Math.floor(((y + 1) / 2) * rows);
+
+      console.log("🔢 그리드 인덱스:", { rowIndex, colIndex });
 
       // 범위 체크
       if (
@@ -69,8 +84,8 @@ export default function Scene() {
 
       const targetId = `${rowIndex}-${colIndex}`;
 
-      // 이미 맞은 타겟인지 확인
-      if (hitTargets.has(targetId)) {
+      // 이미 맞은 타겟인지 확인 (ref 사용)
+      if (hitTargetsRef.current.has(targetId)) {
         console.log("⚠️ 이미 맞은 타겟:", targetId);
         return;
       }
@@ -88,7 +103,11 @@ export default function Scene() {
       ];
 
       // 히트 타겟 추가
-      setHitTargets((prev) => new Set(prev).add(targetId));
+      setHitTargets((prev) => {
+        const newSet = new Set(prev);
+        newSet.add(targetId);
+        return newSet;
+      });
 
       // 히트 이펙트 추가
       setHitEffects((prev) => [
@@ -102,7 +121,7 @@ export default function Scene() {
 
     window.addEventListener("DART_THROW", handleThrow);
     return () => window.removeEventListener("DART_THROW", handleThrow);
-  }, [hitTargets, gridStartX, gridStartY, cellWidth, cellHeight, cols, rows]);
+  }, [gridStartX, gridStartY, cellWidth, cellHeight, cols, rows]);
 
   // 히트 이펙트 완료 핸들러
   const handleEffectComplete = (effectId: string) => {
