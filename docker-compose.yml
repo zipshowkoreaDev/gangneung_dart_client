@@ -6,6 +6,8 @@ services:
       dockerfile: Dockerfile
       args:
         NEXT_PUBLIC_BASE_URL: https://develop.gangneung-dart.zipshowkorea.com
+    environment:
+      - NODE_ENV=production
     ports:
       - "3380:3000"
     networks:
