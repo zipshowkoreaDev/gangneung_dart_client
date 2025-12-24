@@ -113,7 +113,11 @@ export default function MobilePage() {
       socket.off("connect");
       socket.off("connect_error");
       socket.off("disconnect");
-      socket.disconnect();
+
+      // 개발 모드에서는 HMR로 인한 재연결 방지
+      if (process.env.NODE_ENV === "production") {
+        socket.disconnect();
+      }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [room, playerId, addLog]);
@@ -198,10 +202,12 @@ export default function MobilePage() {
       handleMotionRef.current = null;
     }
 
-    socket.emit("aim-off", {
-      room,
-      playerId,
-    });
+    if (socket.connected) {
+      socket.emit("aim-off", {
+        room,
+        playerId,
+      });
+    }
 
     setStatus("대기중");
   }, [room, playerId]);
@@ -249,6 +255,7 @@ export default function MobilePage() {
       const now = performance.now();
       if (
         readyRef.current &&
+        socket.connected &&
         now - lastAimSentRef.current > AIM_INTERVAL &&
         now >= aimBlockedUntilRef.current
       ) {
@@ -317,6 +324,11 @@ export default function MobilePage() {
   /* -------------------- throw -------------------- */
   const throwDart = () => {
     if (!readyRef.current) return;
+    if (!socket.connected) {
+      addLog("⚠️ 소켓 연결 끊김 - 던지기 실패");
+      return;
+    }
+
     readyRef.current = false;
 
     const power = Math.max(0, Math.min(1, accPeakRef.current / 25));

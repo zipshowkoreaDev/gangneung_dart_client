@@ -21,4 +21,8 @@ const getSocketUrl = () => {
 export const socket = io(getSocketUrl(), {
   transports: ["websocket"],
   autoConnect: false,
+  reconnection: true,
+  reconnectionDelay: 1000,
+  reconnectionDelayMax: 5000,
+  reconnectionAttempts: Infinity,
 });

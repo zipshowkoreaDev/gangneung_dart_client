@@ -22,7 +22,6 @@ const nextConfig: NextConfig = {
 
   // 개발 환경에서 네트워크 접근 허용
   allowedDevOrigins: [
-    "http://192.168.0.157:3000",
     "http://localhost:3000",
     "https://develop.gangneung-dart.zipshowkorea.com",
   ],
@@ -31,30 +30,15 @@ const nextConfig: NextConfig = {
   //   remotePatterns: getRemotePatterns(),
   // },
 
-  // Turbopack 설정 (Next.js 16+ 기본값)
-  turbopack: {
-    rules: {
-      "*.svg": {
-        loaders: ["@svgr/webpack"],
-        as: "*.js",
-      },
-    },
-  },
+  // Turbopack 설정 (빈 객체로 webpack 설정과의 충돌 경고 방지)
+  turbopack: {},
 
-  // webpack 설정 (Turbopack 미사용 시)
-  webpack: (config, { isServer }) => {
+  // webpack 설정
+  webpack: (config) => {
     config.module.rules.push({
       test: /\.svg$/,
       use: ["@svgr/webpack"],
     });
-
-    if (!isServer) {
-      config.watchOptions = {
-        ignored: ["**/.next/**", "**/node_modules/**"],
-        aggregateTimeout: 300,
-        poll: 1000,
-      };
-    }
 
     return config;
   },

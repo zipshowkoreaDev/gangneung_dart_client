@@ -1,6 +1,7 @@
+/* eslint-disable react-hooks/exhaustive-deps */
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
 import { Canvas } from "@react-three/fiber";
 import { QRCodeSVG } from "qrcode.react";
 
@@ -63,14 +64,28 @@ export default function DisplayPage() {
   const [isConnected, setIsConnected] = useState(false);
   const [socketUrl, setSocketUrl] = useState("");
 
-  const addLog = (msg: string) => {
+  // 디버깅: 컴포넌트 마운트/언마운트 추적
+  useEffect(() => {
+    console.log("✅ DisplayPage 마운트됨", {
+      room,
+      timestamp: new Date().toLocaleTimeString(),
+    });
+
+    return () => {
+      console.log("❌ DisplayPage 언마운트됨", {
+        room,
+        timestamp: new Date().toLocaleTimeString(),
+      });
+    };
+  }, []); // 빈 배열: 마운트/언마운트 시에만 실행
+
+  const addLog = useCallback((msg: string) => {
     const timestamp = new Date().toLocaleTimeString();
     setDebugLogs((prev) => [...prev.slice(-15), `[${timestamp}] ${msg}`]);
-  };
+  }, []);
 
   // 1) hydration mismatch 방지: client mount 후 room 생성
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     setIsMounted(true);
 
     // localStorage에서 기존 room 가져오기 (새로고침 시에도 유지)
@@ -103,29 +118,45 @@ export default function DisplayPage() {
 
     // Socket URL 저장
     const url = `${window.location.protocol}//${window.location.host}`;
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     setSocketUrl(url);
 
-    // 연결은 display가 주도
-    addLog(`소켓 연결 시도 중... (${url})`);
-    socket.connect();
+    console.log("🔌 Socket useEffect 실행", {
+      room,
+      connected: socket.connected,
+      timestamp: new Date().toLocaleTimeString(),
+    });
 
-    socket.on("connect", () => {
+    // 이미 연결되어 있으면 재연결하지 않음
+    if (!socket.connected) {
+      addLog(`소켓 연결 시도 중... (${url})`);
+      socket.connect();
+    } else {
+      // 이미 연결된 경우 room만 다시 join
+      addLog(`이미 연결됨 - Room 재참가: ${room}`);
+      socket.emit("join-room", { room, role: "display" });
+    }
+
+    const onConnect = () => {
       setIsConnected(true);
       addLog(`✅ 소켓 연결 성공: ${socket.id}`);
       socket.emit("join-room", { room, role: "display" });
       addLog(`🚪 Room 참가: ${room}`);
-    });
+    };
 
-    socket.on("connect_error", (err) => {
+    socket.on("connect", onConnect);
+
+    const onConnectError = (err: Error) => {
       setIsConnected(false);
       addLog(`❌ 연결 에러: ${err.message}`);
-    });
+    };
 
-    socket.on("disconnect", (reason) => {
+    const onDisconnect = (reason: string) => {
       setIsConnected(false);
       addLog(`⚠️ 연결 끊김: ${reason}`);
-    });
+    };
+
+    socket.on("connect_error", onConnectError);
+    socket.on("disconnect", onDisconnect);
 
     const onAimUpdate = (data: AimPayload) => {
       addLog(`🎯 aim-update 수신: ${resolvePlayerKey(data)}`);
@@ -168,18 +199,22 @@ export default function DisplayPage() {
     socket.on("throw", onThrow);
 
     return () => {
-      socket.off("connect");
-      socket.off("connect_error");
-      socket.off("disconnect");
+      console.log("🧹 Socket useEffect cleanup", {
+        room,
+        timestamp: new Date().toLocaleTimeString(),
+      });
+
+      socket.off("connect", onConnect);
+      socket.off("connect_error", onConnectError);
+      socket.off("disconnect", onDisconnect);
       socket.off("aim-update", onAimUpdate);
       socket.off("aim-off", onAimOff);
       socket.off("throw", onThrow);
 
-      // display는 연결 끊어도 되지만, 개발 중 HMR에서는 끊었다/연결했다 반복이 많아서
-      // 깔끔하게 disconnect 하는 편이 안전
-      socket.disconnect();
+      // 개발 모드에서는 절대 disconnect 하지 않음
+      // 프로덕션에서도 페이지를 완전히 떠날 때만 disconnect됨
     };
-  }, [room]);
+  }, [room, addLog]);
 
   return (
     <div

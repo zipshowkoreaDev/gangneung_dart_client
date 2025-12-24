@@ -7,14 +7,28 @@ const dev = process.env.NODE_ENV !== "production";
 const hostname = "0.0.0.0";
 const port = parseInt(process.env.PORT || "3000", 10);
 
-// Next.js 앱 초기화
-const app = next({ dev, hostname, port });
+// Next.js 앱 초기화 (Turbopack 비활성화)
+const app = next({
+  dev,
+  hostname,
+  port,
+  turbo: false, // Turbopack 비활성화
+  customServer: true, // 커스텀 서버 사용
+});
 const handle = app.getRequestHandler();
 
 app.prepare().then(() => {
   const httpServer = createServer(async (req, res) => {
     try {
       const parsedUrl = parse(req.url, true);
+
+      // favicon 요청 처리 (404 에러 방지)
+      if (req.url === "/favicon.ico") {
+        res.writeHead(204); // No Content
+        res.end();
+        return;
+      }
+
       await handle(req, res, parsedUrl);
     } catch (err) {
       console.error("Error occurred handling", req.url, err);
@@ -29,6 +43,8 @@ app.prepare().then(() => {
       origin: "*",
     },
     path: "/socket.io/",
+    pingTimeout: 60000, // 60초
+    pingInterval: 25000, // 25초
   });
 
   io.on("connection", (socket) => {
@@ -41,7 +57,9 @@ app.prepare().then(() => {
 
     socket.on("aim-update", (data) => {
       console.log(
-        `🎯 aim-update from ${data.name || data.playerId} in room ${data.room}:`,
+        `🎯 aim-update from ${data.name || data.playerId} in room ${
+          data.room
+        }:`,
         data.aim
       );
       socket.to(data.room).emit("aim-update", data);

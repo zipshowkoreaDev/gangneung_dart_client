@@ -29,8 +29,6 @@ export default function Target({
   useEffect(() => {
     // 모든 애니메이션 재생
     if (names.length > 0) {
-      console.log(`Available animations for ${modelPath}:`, names);
-
       // 모든 애니메이션 재생
       names.forEach((name) => {
         const action = actions[name];
