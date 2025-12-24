@@ -18,6 +18,10 @@ RUN npm install --force
 # 소스 코드 복사
 COPY . .
 
+# 빌드 인자로 환경변수 받기
+ARG NEXT_PUBLIC_BASE_URL
+ENV NEXT_PUBLIC_BASE_URL=${NEXT_PUBLIC_BASE_URL}
+
 # 3000번 포트 개방
 EXPOSE 3000
 

@@ -229,11 +229,11 @@ export default function MobilePage() {
       const g = e.gamma ?? 0;
       const b = e.beta ?? 0;
 
-      const x = -norm(g, -45, 45);
+      const x = norm(g, -45, 45);
       const y0 = norm(b, 10, 80);
       const faceUp =
         Math.abs(gravityZRef.current) > 4 && gravityZRef.current < 0;
-      const y = faceUp ? -y0 : y0;
+      const y = faceUp ? y0 : -y0;
 
       setAim({ x, y });
       aimReadyRef.current = true;

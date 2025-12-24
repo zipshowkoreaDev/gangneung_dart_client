@@ -4,6 +4,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_BASE_URL: https://develop.gangneung-dart.zipshowkorea.com
     ports:
       - "3380:3000"
     networks:

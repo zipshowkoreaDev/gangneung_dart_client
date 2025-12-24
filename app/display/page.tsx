@@ -72,7 +72,18 @@ export default function DisplayPage() {
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setIsMounted(true);
-    setRoom(createRoom());
+
+    // localStorage에서 기존 room 가져오기 (새로고침 시에도 유지)
+    const savedRoom = localStorage.getItem("display-room");
+    if (savedRoom) {
+      setRoom(savedRoom);
+      addLog(`💾 저장된 Room 복원: ${savedRoom}`);
+    } else {
+      const newRoom = createRoom();
+      setRoom(newRoom);
+      localStorage.setItem("display-room", newRoom);
+      addLog(`🆕 새 Room 생성: ${newRoom}`);
+    }
   }, []);
 
   // 2) QR 링크 생성: 모바일 접속용 IP 사용
