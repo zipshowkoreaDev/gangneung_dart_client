@@ -61,6 +61,7 @@ export default function DisplayPage() {
   const [aimPositions, setAimPositions] = useState<AimState>(() => new Map());
   const [debugLogs, setDebugLogs] = useState<string[]>([]);
   const [isConnected, setIsConnected] = useState(false);
+  const [socketUrl, setSocketUrl] = useState("");
 
   const addLog = (msg: string) => {
     const timestamp = new Date().toLocaleTimeString();
@@ -89,8 +90,13 @@ export default function DisplayPage() {
   useEffect(() => {
     if (!room) return;
 
+    // Socket URL 저장
+    const url = `${window.location.protocol}//${window.location.host}`;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setSocketUrl(url);
+
     // 연결은 display가 주도
-    addLog(`소켓 연결 시도 중... (${socket.io.uri})`);
+    addLog(`소켓 연결 시도 중... (${url})`);
     socket.connect();
 
     socket.on("connect", () => {
@@ -199,7 +205,7 @@ export default function DisplayPage() {
             연결: {isConnected ? "🟢" : "🔴"} | Room: {room || "없음"}
           </div>
           <div style={{ marginBottom: "4px", fontSize: "10px", opacity: 0.8 }}>
-            Socket: {socket.io.uri}
+            Socket: {socketUrl}
           </div>
           <div style={{ marginBottom: "4px" }}>
             조준점: {aimPositions.size}개

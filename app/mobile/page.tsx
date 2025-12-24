@@ -7,15 +7,27 @@ import DartPreview from "@/three/DartPreview";
 
 type Skin = "red" | "blue" | "yellow";
 
+// iOS DeviceMotion/Orientation 권한 타입
+type PermissionState = "granted" | "denied" | "default";
+
+interface DeviceMotionEventiOS {
+  requestPermission?: () => Promise<PermissionState>;
+}
+
+interface DeviceOrientationEventiOS {
+  requestPermission?: () => Promise<PermissionState>;
+}
+
 export default function MobilePage() {
   const [room, setRoom] = useState("");
   const [playerId, setPlayerId] = useState("");
-  const [skin, setSkin] = useState<Skin>("red");
+  const [skin] = useState<Skin>("red");
   const [status, setStatus] = useState("대기중");
   const [isReady, setIsReady] = useState(false);
   const [aim, setAim] = useState({ x: 0, y: 0 }); // -1..1
   const [debugLogs, setDebugLogs] = useState<string[]>([]);
   const [isConnected, setIsConnected] = useState(false);
+  const [socketUrl, setSocketUrl] = useState("");
 
   /* -------------------- refs -------------------- */
   const sensorsActiveRef = useRef(false);
@@ -56,14 +68,22 @@ export default function MobilePage() {
     const r = params.get("room") || "DEMO";
     setRoom(r.toUpperCase());
     setPlayerId(`Player${Math.floor(Math.random() * 1000)}`);
-    addLog(`Room: ${r.toUpperCase()}, Player: Player${Math.floor(Math.random() * 1000)}`);
+    addLog(
+      `Room: ${r.toUpperCase()}, Player: Player${Math.floor(
+        Math.random() * 1000
+      )}`
+    );
   }, [addLog]);
 
   /* -------------------- socket -------------------- */
   useEffect(() => {
     if (!room) return;
 
-    addLog(`소켓 연결 시도 중... (${socket.io.uri})`);
+    // Socket URL 저장
+    const url = `${window.location.protocol}//${window.location.host}`;
+    setSocketUrl(url);
+
+    addLog(`소켓 연결 시도 중... (${url})`);
     socket.connect();
 
     socket.on("connect", () => {
@@ -117,11 +137,15 @@ export default function MobilePage() {
         "requestPermission" in DeviceMotionEvent
       ) {
         addLog("DeviceMotionEvent 권한 요청 중...");
-        const r = await (DeviceMotionEvent as any).requestPermission();
-        addLog(`DeviceMotionEvent 권한 결과: ${r}`);
-        if (r !== "granted") {
-          addLog("❌ 모션 권한 거부됨");
-          return false;
+        const DeviceMotion =
+          DeviceMotionEvent as unknown as DeviceMotionEventiOS;
+        if (DeviceMotion.requestPermission) {
+          const result = await DeviceMotion.requestPermission();
+          addLog(`DeviceMotionEvent 권한 결과: ${result}`);
+          if (result !== "granted") {
+            addLog("❌ 모션 권한 거부됨");
+            return false;
+          }
         }
       } else {
         addLog("DeviceMotionEvent 권한 불필요 (Android 또는 구형 iOS)");
@@ -132,11 +156,15 @@ export default function MobilePage() {
         "requestPermission" in DeviceOrientationEvent
       ) {
         addLog("DeviceOrientationEvent 권한 요청 중...");
-        const r = await (DeviceOrientationEvent as any).requestPermission();
-        addLog(`DeviceOrientationEvent 권한 결과: ${r}`);
-        if (r !== "granted") {
-          addLog("❌ 방향 권한 거부됨");
-          return false;
+        const DeviceOrientation =
+          DeviceOrientationEvent as unknown as DeviceOrientationEventiOS;
+        if (DeviceOrientation.requestPermission) {
+          const result = await DeviceOrientation.requestPermission();
+          addLog(`DeviceOrientationEvent 권한 결과: ${result}`);
+          if (result !== "granted") {
+            addLog("❌ 방향 권한 거부됨");
+            return false;
+          }
         }
       } else {
         addLog("DeviceOrientationEvent 권한 불필요");
@@ -213,7 +241,9 @@ export default function MobilePage() {
       // 처음 이벤트 발생 로그
       orientationCount++;
       if (orientationCount === 1) {
-        addLog(`📱 자이로 이벤트 발생! gamma=${g.toFixed(1)}, beta=${b.toFixed(1)}`);
+        addLog(
+          `📱 자이로 이벤트 발생! gamma=${g.toFixed(1)}, beta=${b.toFixed(1)}`
+        );
       }
 
       const now = performance.now();
@@ -364,7 +394,9 @@ export default function MobilePage() {
           overflowY: "auto",
         }}
       >
-        <div style={{ marginBottom: "4px", fontWeight: "bold", fontSize: "12px" }}>
+        <div
+          style={{ marginBottom: "4px", fontWeight: "bold", fontSize: "12px" }}
+        >
           🔧 디버그 정보
         </div>
         <div style={{ marginBottom: "4px" }}>
@@ -373,11 +405,19 @@ export default function MobilePage() {
         <div style={{ marginBottom: "4px" }}>Room: {room || "없음"}</div>
         <div style={{ marginBottom: "4px" }}>Player: {playerId || "없음"}</div>
         <div style={{ marginBottom: "4px" }}>
-          Socket URL: {typeof window !== "undefined" ? socket.io.uri : "N/A"}
+          Socket URL: {socketUrl || "N/A"}
         </div>
-        <div style={{ marginTop: "8px", borderTop: "1px solid #444", paddingTop: "4px" }}>
+        <div
+          style={{
+            marginTop: "8px",
+            borderTop: "1px solid #444",
+            paddingTop: "4px",
+          }}
+        >
           <strong>로그:</strong>
-          {debugLogs.length === 0 && <div style={{ opacity: 0.6 }}>로그 없음</div>}
+          {debugLogs.length === 0 && (
+            <div style={{ opacity: 0.6 }}>로그 없음</div>
+          )}
           {debugLogs.map((log, idx) => (
             <div key={idx} style={{ fontSize: "10px", opacity: 0.9 }}>
               {log}
@@ -432,7 +472,9 @@ export default function MobilePage() {
               textAlign: "center",
             }}
           >
-            <div>조준: ({aim.x.toFixed(2)}, {aim.y.toFixed(2)})</div>
+            <div>
+              조준: ({aim.x.toFixed(2)}, {aim.y.toFixed(2)})
+            </div>
             <div style={{ fontSize: "12px", opacity: 0.8, marginTop: "4px" }}>
               {status}
             </div>
