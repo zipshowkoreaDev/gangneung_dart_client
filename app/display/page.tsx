@@ -59,6 +59,13 @@ export default function DisplayPage() {
   const [isMounted, setIsMounted] = useState(false);
   const [room, setRoom] = useState("");
   const [aimPositions, setAimPositions] = useState<AimState>(() => new Map());
+  const [debugLogs, setDebugLogs] = useState<string[]>([]);
+  const [isConnected, setIsConnected] = useState(false);
+
+  const addLog = (msg: string) => {
+    const timestamp = new Date().toLocaleTimeString();
+    setDebugLogs((prev) => [...prev.slice(-15), `[${timestamp}] ${msg}`]);
+  };
 
   // 1) hydration mismatch 방지: client mount 후 room 생성
   useEffect(() => {
@@ -83,10 +90,28 @@ export default function DisplayPage() {
     if (!room) return;
 
     // 연결은 display가 주도
+    addLog(`소켓 연결 시도 중... (${socket.io.uri})`);
     socket.connect();
-    socket.emit("join-room", { room, role: "display" });
+
+    socket.on("connect", () => {
+      setIsConnected(true);
+      addLog(`✅ 소켓 연결 성공: ${socket.id}`);
+      socket.emit("join-room", { room, role: "display" });
+      addLog(`🚪 Room 참가: ${room}`);
+    });
+
+    socket.on("connect_error", (err) => {
+      setIsConnected(false);
+      addLog(`❌ 연결 에러: ${err.message}`);
+    });
+
+    socket.on("disconnect", (reason) => {
+      setIsConnected(false);
+      addLog(`⚠️ 연결 끊김: ${reason}`);
+    });
 
     const onAimUpdate = (data: AimPayload) => {
+      addLog(`🎯 aim-update 수신: ${resolvePlayerKey(data)}`);
       // room 체크(안 넣어도 되지만 안전하게)
       if (data.room && data.room !== room) return;
 
@@ -102,6 +127,7 @@ export default function DisplayPage() {
     };
 
     const onAimOff = (data: AimOffPayload) => {
+      addLog(`❌ aim-off 수신: ${resolvePlayerKey(data)}`);
       if (data.room && data.room !== room) return;
 
       const key = resolvePlayerKey(data);
@@ -113,6 +139,7 @@ export default function DisplayPage() {
     };
 
     const onThrow = (data: ThrowPayload) => {
+      addLog(`🎲 throw 수신: ${resolvePlayerKey(data)}`);
       if (data.room && data.room !== room) return;
 
       // R3F로 throw 이벤트 전달 (Explosion 트리거 등)
@@ -124,6 +151,9 @@ export default function DisplayPage() {
     socket.on("throw", onThrow);
 
     return () => {
+      socket.off("connect");
+      socket.off("connect_error");
+      socket.off("disconnect");
       socket.off("aim-update", onAimUpdate);
       socket.off("aim-off", onAimOff);
       socket.off("throw", onThrow);
@@ -143,6 +173,55 @@ export default function DisplayPage() {
         overflow: "hidden",
       }}
     >
+      {/* 디버그 패널 */}
+      {isMounted && (
+        <div
+          style={{
+            position: "fixed",
+            top: 10,
+            left: 10,
+            zIndex: 10,
+            background: "rgba(0, 0, 0, 0.9)",
+            color: "white",
+            padding: "10px 15px",
+            borderRadius: 8,
+            fontFamily: "monospace",
+            fontSize: "12px",
+            maxWidth: "400px",
+            maxHeight: "50vh",
+            overflowY: "auto",
+          }}
+        >
+          <div style={{ fontWeight: "bold", marginBottom: "8px" }}>
+            🔧 Display 디버그
+          </div>
+          <div style={{ marginBottom: "4px" }}>
+            연결: {isConnected ? "🟢" : "🔴"} | Room: {room || "없음"}
+          </div>
+          <div style={{ marginBottom: "4px", fontSize: "10px", opacity: 0.8 }}>
+            Socket: {socket.io.uri}
+          </div>
+          <div style={{ marginBottom: "4px" }}>
+            조준점: {aimPositions.size}개
+          </div>
+          <div
+            style={{
+              marginTop: "8px",
+              borderTop: "1px solid #444",
+              paddingTop: "4px",
+              fontSize: "10px",
+            }}
+          >
+            <strong>로그:</strong>
+            {debugLogs.map((log, idx) => (
+              <div key={idx} style={{ opacity: 0.9 }}>
+                {log}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* QR 카드 */}
       <div
         style={{

@@ -14,6 +14,8 @@ export default function MobilePage() {
   const [status, setStatus] = useState("대기중");
   const [isReady, setIsReady] = useState(false);
   const [aim, setAim] = useState({ x: 0, y: 0 }); // -1..1
+  const [debugLogs, setDebugLogs] = useState<string[]>([]);
+  const [isConnected, setIsConnected] = useState(false);
 
   /* -------------------- refs -------------------- */
   const sensorsActiveRef = useRef(false);
@@ -42,39 +44,59 @@ export default function MobilePage() {
   const AIM_HZ = 30;
   const AIM_INTERVAL = 1000 / AIM_HZ;
 
+  /* -------------------- debug log -------------------- */
+  const addLog = useCallback((msg: string) => {
+    const timestamp = new Date().toLocaleTimeString();
+    setDebugLogs((prev) => [...prev.slice(-20), `[${timestamp}] ${msg}`]);
+  }, []);
+
   /* -------------------- init -------------------- */
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const r = params.get("room") || "DEMO";
     setRoom(r.toUpperCase());
     setPlayerId(`Player${Math.floor(Math.random() * 1000)}`);
-  }, []);
+    addLog(`Room: ${r.toUpperCase()}, Player: Player${Math.floor(Math.random() * 1000)}`);
+  }, [addLog]);
 
   /* -------------------- socket -------------------- */
   useEffect(() => {
     if (!room) return;
 
+    addLog(`소켓 연결 시도 중... (${socket.io.uri})`);
     socket.connect();
 
     socket.on("connect", () => {
+      setIsConnected(true);
+      addLog(`✅ 소켓 연결 성공: ${socket.id}`);
       socket.emit("join-room", {
         room,
         role: "mobile",
         playerId,
       });
+      addLog(`🚪 Room 참가: ${room}`);
     });
 
     socket.on("connect_error", (err) => {
+      setIsConnected(false);
+      addLog(`❌ 연결 에러: ${err.message}`);
       console.error("❌ socket error:", err);
+    });
+
+    socket.on("disconnect", (reason) => {
+      setIsConnected(false);
+      addLog(`⚠️ 연결 끊김: ${reason}`);
     });
 
     return () => {
       stopSensors();
       socket.off("connect");
       socket.off("connect_error");
+      socket.off("disconnect");
       socket.disconnect();
     };
-  }, [room, playerId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [room, playerId, addLog]);
 
   /* -------------------- utils -------------------- */
   const norm = (v: number, a: number, b: number) =>
@@ -83,32 +105,47 @@ export default function MobilePage() {
   /* -------------------- permission -------------------- */
   const requestMotionPermission = async (): Promise<boolean> => {
     try {
+      // 플랫폼 감지
+      const isIOS =
+        /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+        (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+      addLog(`플랫폼: ${isIOS ? "iOS" : "Android/기타"}`);
+
+      // iOS 13+ 권한 요청
       if (
         typeof DeviceMotionEvent !== "undefined" &&
         "requestPermission" in DeviceMotionEvent
       ) {
+        addLog("DeviceMotionEvent 권한 요청 중...");
         const r = await (DeviceMotionEvent as any).requestPermission();
+        addLog(`DeviceMotionEvent 권한 결과: ${r}`);
         if (r !== "granted") {
-          alert("모션 권한 거부됨");
+          addLog("❌ 모션 권한 거부됨");
           return false;
         }
+      } else {
+        addLog("DeviceMotionEvent 권한 불필요 (Android 또는 구형 iOS)");
       }
 
       if (
         typeof DeviceOrientationEvent !== "undefined" &&
         "requestPermission" in DeviceOrientationEvent
       ) {
+        addLog("DeviceOrientationEvent 권한 요청 중...");
         const r = await (DeviceOrientationEvent as any).requestPermission();
+        addLog(`DeviceOrientationEvent 권한 결과: ${r}`);
         if (r !== "granted") {
-          alert("방향 권한 거부됨");
+          addLog("❌ 방향 권한 거부됨");
           return false;
         }
+      } else {
+        addLog("DeviceOrientationEvent 권한 불필요");
       }
 
-      alert("모션 권한 허용됨");
+      addLog("✅ 모든 권한 허용됨");
       return true;
     } catch (e) {
-      alert(`권한 요청 실패: ${e}`);
+      addLog(`❌ 권한 요청 오류: ${e}`);
       return false;
     }
   };
@@ -145,6 +182,7 @@ export default function MobilePage() {
   const startSensors = () => {
     if (sensorsActiveRef.current) return;
 
+    addLog("🎮 센서 시작");
     sensorsActiveRef.current = true;
     readyRef.current = true;
     setIsReady(true);
@@ -158,6 +196,7 @@ export default function MobilePage() {
     aimReadyRef.current = false;
 
     /* orientation → aim */
+    let orientationCount = 0;
     handleOrientationRef.current = (e: DeviceOrientationEvent) => {
       const g = e.gamma ?? 0;
       const b = e.beta ?? 0;
@@ -170,6 +209,12 @@ export default function MobilePage() {
 
       setAim({ x, y });
       aimReadyRef.current = true;
+
+      // 처음 이벤트 발생 로그
+      orientationCount++;
+      if (orientationCount === 1) {
+        addLog(`📱 자이로 이벤트 발생! gamma=${g.toFixed(1)}, beta=${b.toFixed(1)}`);
+      }
 
       const now = performance.now();
       if (
@@ -184,6 +229,10 @@ export default function MobilePage() {
           skin,
           aim: { x, y },
         });
+        // 처음 한 번만 로그 (너무 많이 찍히지 않도록)
+        if (now - armedAtRef.current < 2000) {
+          addLog(`📡 aim-update 전송 (room=${room}, player=${playerId})`);
+        }
       }
     };
 
@@ -222,8 +271,17 @@ export default function MobilePage() {
       }
     };
 
+    addLog("🔧 이벤트 리스너 등록 시작...");
     window.addEventListener("deviceorientation", handleOrientationRef.current);
     window.addEventListener("devicemotion", handleMotionRef.current);
+    addLog("✅ 이벤트 리스너 등록 완료");
+
+    // 2초 후에도 이벤트가 없으면 경고
+    setTimeout(() => {
+      if (orientationCount === 0) {
+        addLog("⚠️ 자이로 이벤트가 발생하지 않음! 권한을 확인하세요.");
+      }
+    }, 2000);
   };
 
   /* -------------------- throw -------------------- */
@@ -233,6 +291,7 @@ export default function MobilePage() {
 
     const power = Math.max(0, Math.min(1, accPeakRef.current / 25));
 
+    addLog(`🎯 다트 던짐! power=${power.toFixed(2)}`);
     socket.emit("throw", {
       room,
       playerId,
@@ -266,8 +325,13 @@ export default function MobilePage() {
   };
 
   const handleStart = async () => {
+    addLog("🔑 모션 권한 요청 중...");
     const ok = await requestMotionPermission();
-    if (!ok) return;
+    if (!ok) {
+      addLog("❌ 모션 권한 거부됨");
+      return;
+    }
+    addLog("✅ 모션 권한 허용됨");
     startSensors();
   };
 
@@ -283,6 +347,44 @@ export default function MobilePage() {
         overflow: "hidden",
       }}
     >
+      {/* 디버그 패널 */}
+      <div
+        style={{
+          position: "absolute",
+          top: 0,
+          left: 0,
+          right: 0,
+          zIndex: 100,
+          background: "rgba(0, 0, 0, 0.85)",
+          color: "#fff",
+          padding: "8px 12px",
+          fontSize: "11px",
+          fontFamily: "monospace",
+          maxHeight: "40vh",
+          overflowY: "auto",
+        }}
+      >
+        <div style={{ marginBottom: "4px", fontWeight: "bold", fontSize: "12px" }}>
+          🔧 디버그 정보
+        </div>
+        <div style={{ marginBottom: "4px" }}>
+          연결 상태: {isConnected ? "🟢 연결됨" : "🔴 연결 안됨"}
+        </div>
+        <div style={{ marginBottom: "4px" }}>Room: {room || "없음"}</div>
+        <div style={{ marginBottom: "4px" }}>Player: {playerId || "없음"}</div>
+        <div style={{ marginBottom: "4px" }}>
+          Socket URL: {typeof window !== "undefined" ? socket.io.uri : "N/A"}
+        </div>
+        <div style={{ marginTop: "8px", borderTop: "1px solid #444", paddingTop: "4px" }}>
+          <strong>로그:</strong>
+          {debugLogs.length === 0 && <div style={{ opacity: 0.6 }}>로그 없음</div>}
+          {debugLogs.map((log, idx) => (
+            <div key={idx} style={{ fontSize: "10px", opacity: 0.9 }}>
+              {log}
+            </div>
+          ))}
+        </div>
+      </div>
       {/* ✅ 3D 다트 프리뷰 (배경처럼) */}
       <div
         style={{
@@ -313,6 +415,30 @@ export default function MobilePage() {
         }}
       >
         {/* 여기부터는 너의 기존 isReady 분기 UI 그대로 두면 됨 */}
+        {isReady && (
+          <div
+            style={{
+              position: "absolute",
+              bottom: 20,
+              left: "50%",
+              transform: "translateX(-50%)",
+              zIndex: 50,
+              background: "rgba(0, 0, 0, 0.8)",
+              color: "white",
+              padding: "12px 20px",
+              borderRadius: 8,
+              fontFamily: "monospace",
+              fontSize: "14px",
+              textAlign: "center",
+            }}
+          >
+            <div>조준: ({aim.x.toFixed(2)}, {aim.y.toFixed(2)})</div>
+            <div style={{ fontSize: "12px", opacity: 0.8, marginTop: "4px" }}>
+              {status}
+            </div>
+          </div>
+        )}
+
         {!isReady && (
           <div
             style={{

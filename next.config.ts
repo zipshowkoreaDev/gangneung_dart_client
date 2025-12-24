@@ -21,7 +21,11 @@ const nextConfig: NextConfig = {
   productionBrowserSourceMaps: true,
 
   // 개발 환경에서 네트워크 접근 허용
-  allowedDevOrigins: ["http://192.168.0.157:3000", "http://localhost:3000"],
+  allowedDevOrigins: [
+    "http://192.168.0.157:3000",
+    "http://localhost:3000",
+    "https://develop.gangneung-dart.zipshowkorea.com",
+  ],
 
   // images: {
   //   remotePatterns: getRemotePatterns(),
