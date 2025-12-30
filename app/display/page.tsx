@@ -56,7 +56,6 @@ export default function DisplayPage() {
   const [room, setRoom] = useState("");
   const [aimPositions, setAimPositions] = useState<AimState>(() => new Map());
 
-  // 턴제 시스템 state
   const [players, setPlayers] = useState<Map<string, PlayerScore>>(
     () => new Map()
   );
@@ -225,6 +224,40 @@ export default function DisplayPage() {
       const key = resolvePlayerKey(data);
       const x = clamp(data.aim?.x ?? 0, -1, 1);
       const y = clamp(data.aim?.y ?? 0, -1, 1);
+
+      if (key && key !== "_display") {
+        setPlayers((prev) => {
+          if (prev.has(key)) return prev;
+          if (prev.size >= 2) {
+            addLog(`Player limit: Max 2 (${key} rejected)`);
+            return prev;
+          }
+
+          const next = new Map(prev);
+          next.set(key, {
+            name: key,
+            score: 0,
+            isConnected: true,
+            totalThrows: 0,
+          });
+          addLog(`Player auto-joined: ${key}`);
+
+          setPlayerOrder((prevOrder) => {
+            if (!prevOrder.includes(key)) {
+              return [...prevOrder, key];
+            }
+            return prevOrder;
+          });
+
+          if (prev.size === 0 && !currentTurn) {
+            setCurrentTurn(key);
+            socket.emit("turn-update", { room, currentTurn: key });
+            addLog(`Turn started: ${key}`);
+          }
+
+          return next;
+        });
+      }
 
       setAimPositions((prev) => {
         const next = new Map(prev);
@@ -433,9 +466,7 @@ export default function DisplayPage() {
               </div>
               <div style={{ fontSize: 14, opacity: 0.7 }}>
                 {Array.from(players.values())[0]?.totalThrows}회 던짐 •{" "}
-                {Array.from(players.values())[0]?.isConnected
-                  ? "🟢 접속"
-                  : "⚫ 나감"}
+                {Array.from(players.values())[0]?.isConnected ? "접속" : "나감"}
               </div>
               {/* 혼자하기 버튼 */}
               {players.size === 1 && !isSoloMode && (
@@ -461,7 +492,9 @@ export default function DisplayPage() {
                   onMouseLeave={(e) => {
                     e.currentTarget.style.transform = "scale(1)";
                   }}
-                ></button>
+                >
+                  혼자하기 시작
+                </button>
               )}
               {isSoloMode && (
                 <div style={{ fontSize: 12, color: "#FFD700", marginTop: 8 }}>
@@ -540,8 +573,8 @@ export default function DisplayPage() {
                 <div style={{ fontSize: 14, opacity: 0.7 }}>
                   {Array.from(players.values())[1]?.totalThrows}회 던짐 •{" "}
                   {Array.from(players.values())[1]?.isConnected
-                    ? "🟢 접속"
-                    : "⚫ 나감"}
+                    ? "접속"
+                    : "나감"}
                 </div>
               </>
             ) : null}
