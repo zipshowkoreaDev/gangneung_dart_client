@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, useCallback } from "react";
+import { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import { Canvas } from "@react-three/fiber";
 import { QRCodeSVG } from "qrcode.react";
 
@@ -61,7 +61,8 @@ export default function DisplayPage() {
   );
   const [currentTurn, setCurrentTurn] = useState<string | null>(null);
   const [playerOrder, setPlayerOrder] = useState<string[]>([]);
-  const [isSoloMode, setIsSoloMode] = useState(false); // 혼자하기 모드
+  const [isSoloMode, setIsSoloMode] = useState(false);
+  const isSoloModeRef = useRef(false);
 
   useEffect(() => {
     console.log("DisplayPage mounted", { room });
@@ -80,6 +81,7 @@ export default function DisplayPage() {
     if (players.size !== 1) return;
 
     setIsSoloMode(true);
+    isSoloModeRef.current = true;
     const soloPlayer = Array.from(players.keys())[0];
     setCurrentTurn(soloPlayer);
     addLog(`Solo mode started: ${soloPlayer}`);
@@ -149,7 +151,7 @@ export default function DisplayPage() {
     }) => {
       if (data.name === "_display") return;
 
-      if (isSoloMode) {
+      if (isSoloModeRef.current) {
         addLog(`Solo mode: Player rejected (${data.name})`);
         socket.emit("player-rejected", {
           room: data.room,
@@ -229,7 +231,7 @@ export default function DisplayPage() {
         setPlayers((prev) => {
           if (prev.has(key)) return prev;
 
-          if (isSoloMode) {
+          if (isSoloModeRef.current) {
             addLog(`Solo mode: Player rejected (${key})`);
             socket.emit("player-rejected", {
               room,
@@ -255,7 +257,9 @@ export default function DisplayPage() {
 
           setPlayerOrder((prevOrder) => {
             if (!prevOrder.includes(key)) {
-              return [...prevOrder, key];
+              const newOrder = [...prevOrder, key];
+              addLog(`Player order updated: [${newOrder.join(", ")}]`);
+              return newOrder;
             }
             return prevOrder;
           });
@@ -264,6 +268,8 @@ export default function DisplayPage() {
             setCurrentTurn(key);
             socket.emit("turn-update", { room, currentTurn: key });
             addLog(`Turn started: ${key} (first player)`);
+          } else {
+            addLog(`Player joined but turn not started (prevSize=${prev.size}, currentTurn=${currentTurn})`);
           }
 
           return next;
@@ -354,13 +360,15 @@ export default function DisplayPage() {
 
               if (nextPlayerData?.isConnected) {
                 setCurrentTurn(nextPlayer);
-                addLog(`Turn: ${data.name} -> ${nextPlayer}`);
+                addLog(`Turn rotation: ${data.name} -> ${nextPlayer} (order: [${playerOrder.join(", ")}])`);
                 socket.emit("turn-update", {
                   room: data.room,
                   currentTurn: nextPlayer,
                 });
                 foundNext = true;
                 break;
+              } else {
+                addLog(`Skipping ${nextPlayer} (not connected)`);
               }
 
               nextIndex = (nextIndex + 1) % playerOrder.length;
