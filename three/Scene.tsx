@@ -1,135 +1,206 @@
-import { OrbitControls } from "@react-three/drei";
-import { useEffect, useState, useRef } from "react";
-import MachineProcedural from "./MachineProcedural";
-import Target from "./Target";
-import HitEffect from "./HitEffect";
+"use client";
 
-interface HitEffectData {
+import { useRef, useState, useEffect } from "react";
+import { OrbitControls, useGLTF } from "@react-three/drei";
+import { useFrame, useThree } from "@react-three/fiber";
+import * as THREE from "three";
+
+interface StuckDartProps {
+  position: [number, number, number];
+}
+
+function StuckDart({ position }: StuckDartProps) {
+  const { scene } = useGLTF("/models/dart.glb");
+
+  return (
+    <group position={position}>
+      <primitive
+        object={scene.clone()}
+        rotation={[0, 0, -Math.PI / 2]}
+        scale={0.4}
+      />
+    </group>
+  );
+}
+
+interface FlyingDartProps {
+  targetPosition: [number, number, number];
+  onComplete: () => void;
+}
+
+function FlyingDart({ targetPosition, onComplete }: FlyingDartProps) {
+  const groupRef = useRef<THREE.Group>(null);
+  const { scene } = useGLTF("/models/dart.glb");
+  const [progress, setProgress] = useState(0);
+
+  // 시작 위치 (화면 앞쪽, 아래쪽)
+  const startPosition: [number, number, number] = [
+    targetPosition[0],
+    targetPosition[1],
+    30, // 카메라 앞쪽에서 시작
+  ];
+
+  useFrame((_, delta) => {
+    if (!groupRef.current) return;
+
+    // 진행도 업데이트 (1초 동안 날아감)
+    setProgress((prev) => {
+      const next = prev + delta * 1.5; // 속도 조절
+      if (next >= 1) {
+        onComplete();
+        return 1;
+      }
+      return next;
+    });
+
+    // lerp로 위치 보간
+    groupRef.current.position.x = THREE.MathUtils.lerp(
+      startPosition[0],
+      targetPosition[0],
+      progress
+    );
+    groupRef.current.position.y = THREE.MathUtils.lerp(
+      startPosition[1],
+      targetPosition[1],
+      progress
+    );
+    groupRef.current.position.z = THREE.MathUtils.lerp(
+      startPosition[2],
+      targetPosition[2],
+      progress
+    );
+
+    // 날아가는 동안 빠르게 회전
+    groupRef.current.rotation.y += delta * 3;
+  });
+
+  return (
+    <group ref={groupRef}>
+      <primitive
+        object={scene.clone()}
+        rotation={[0, 0, -Math.PI / 2]}
+        scale={0.4}
+      />
+    </group>
+  );
+}
+
+interface ThrownDart {
   id: string;
   position: [number, number, number];
 }
 
-export default function Scene() {
-  // 8줄 x 6열 그리드 생성
-  const rows = 8;
-  const cols = 6;
-  const models = [
-    "/test/model_1.glb",
-    "/test/model_2.glb",
-    "/test/model_3.glb",
-  ];
+interface FlyingDartData {
+  id: string;
+  position: [number, number, number];
+}
 
-  // 맞은 타겟 추적 (row-col 형식)
-  const [hitTargets, setHitTargets] = useState<Set<string>>(new Set());
-  // 활성 히트 이펙트 추적
-  const [hitEffects, setHitEffects] = useState<HitEffectData[]>([]);
-  // hitTargets의 최신 값을 ref로 추적 (stale closure 방지)
-  const hitTargetsRef = useRef<Set<string>>(new Set());
+function RotatingRoulette({
+  flyingDarts,
+  stuckDarts,
+}: {
+  flyingDarts: FlyingDartData[];
+  stuckDarts: ThrownDart[];
+}) {
+  const groupRef = useRef<THREE.Group>(null);
+  const { scene } = useGLTF("/models/roulette.glb");
 
-  // MachineProcedural과 동일한 치수 사용
-  const machineW = 22;
-  const machineH = 40;
-  const frame = 1.2;
-  const innerW = machineW - frame * 2;
-  const innerH = machineH - frame * 2;
+  // 시계 방향으로 천천히 회전
+  useFrame((_, delta) => {
+    if (!groupRef.current) return;
+    // Z축 기준 회전
+    groupRef.current.rotation.z -= delta * 0.3; // 0.3은 회전 속도 (조절 가능)
+  });
 
-  // 격자 칸 크기
-  const cellWidth = innerW / cols;
-  const cellHeight = innerH / rows;
+  return (
+    <group ref={groupRef}>
+      <primitive object={scene} rotation={[0, -Math.PI / 2, 0]} scale={1.25} />
 
-  // 그리드 시작점 (왼쪽 상단)
-  const gridStartX = -innerW / 2;
-  const gridStartY = innerH / 2;
+      {/* 날아가는 다트들 */}
+      {flyingDarts.map((dart) => (
+        <FlyingDart
+          key={dart.id}
+          targetPosition={dart.position}
+          onComplete={() => {}}
+        />
+      ))}
 
-  // hitTargets 변경 시 ref 업데이트
-  useEffect(() => {
-    hitTargetsRef.current = hitTargets;
-  }, [hitTargets]);
+      {/* 꽂힌 다트들 */}
+      {stuckDarts.map((dart) => (
+        <StuckDart key={dart.id} position={dart.position} />
+      ))}
+    </group>
+  );
+}
 
-  // DART_THROW 이벤트 리스너 - 히트 감지
+function DartEventHandler({
+  onDartThrow,
+}: {
+  onDartThrow: (position: [number, number, number]) => void;
+}) {
+  const { camera } = useThree();
+
   useEffect(() => {
     const handleThrow = (event: Event) => {
       const customEvent = event as CustomEvent;
       const data = customEvent.detail;
 
-      console.log("🎲 DART_THROW 이벤트 수신:", data);
+      if (!data.aim) return;
 
-      // aim 좌표가 있는지 확인
-      if (!data.aim) {
-        console.log("⚠️ aim 좌표 없음");
-        return;
-      }
+      const { x, y } = data.aim; // -1..1 범위 (NDC)
 
-      const { x, y } = data.aim; // -1..1 범위
-      console.log("📍 aim 좌표:", { x, y });
+      // Raycaster로 화면 좌표를 3D 좌표로 변환
+      const raycaster = new THREE.Raycaster();
+      const mouse = new THREE.Vector2(x, y);
 
-      // aim 좌표를 그리드 인덱스로 변환
-      // x: -1(왼쪽) ~ 1(오른쪽) → 0 ~ cols-1
-      // y: -1(위) ~ 1(아래) → 0 ~ rows-1
-      const colIndex = Math.floor(((x + 1) / 2) * cols);
-      const rowIndex = Math.floor(((y + 1) / 2) * rows);
+      // 카메라에서 마우스 위치로 ray 설정
+      raycaster.setFromCamera(mouse, camera);
 
-      console.log("🔢 그리드 인덱스:", { rowIndex, colIndex });
+      // 룰렛 평면 (z = 1)과 교차점 계산
+      const plane = new THREE.Plane(new THREE.Vector3(0, 0, 1), -1); // z = 1 평면
+      const intersectPoint = new THREE.Vector3();
+      raycaster.ray.intersectPlane(plane, intersectPoint);
 
-      // 범위 체크
-      if (
-        rowIndex < 0 ||
-        rowIndex >= rows ||
-        colIndex < 0 ||
-        colIndex >= cols
-      ) {
-        console.log("❌ 타겟 범위 밖:", { rowIndex, colIndex, x, y });
-        return;
-      }
+      console.log("🎯 Aim:", { x, y }, "→ 3D:", intersectPoint);
 
-      const targetId = `${rowIndex}-${colIndex}`;
-
-      // 이미 맞은 타겟인지 확인 (ref 사용)
-      if (hitTargetsRef.current.has(targetId)) {
-        console.log("⚠️ 이미 맞은 타겟:", targetId);
-        return;
-      }
-
-      console.log("🎯 히트!", { targetId, rowIndex, colIndex, x, y });
-
-      // 히트한 타겟의 실제 위치 계산
-      const cellCenterX = gridStartX + cellWidth * (colIndex + 0.5);
-      const cellBottomY = gridStartY - cellHeight * (rowIndex + 1);
-      const targetY = cellBottomY + 0.8;
-      const targetPosition: [number, number, number] = [
-        cellCenterX,
-        targetY,
-        0,
-      ];
-
-      // 히트 타겟 추가
-      setHitTargets((prev) => {
-        const newSet = new Set(prev);
-        newSet.add(targetId);
-        return newSet;
-      });
-
-      // 히트 이펙트 추가
-      setHitEffects((prev) => [
-        ...prev,
-        {
-          id: `${targetId}-${Date.now()}`,
-          position: targetPosition,
-        },
-      ]);
+      onDartThrow([intersectPoint.x, intersectPoint.y, intersectPoint.z]);
     };
 
     window.addEventListener("DART_THROW", handleThrow);
     return () => window.removeEventListener("DART_THROW", handleThrow);
-  }, [gridStartX, gridStartY, cellWidth, cellHeight, cols, rows]);
+  }, [camera, onDartThrow]);
 
-  // 히트 이펙트 완료 핸들러
-  const handleEffectComplete = (effectId: string) => {
-    setHitEffects((prev) => prev.filter((effect) => effect.id !== effectId));
+  return null;
+}
+
+export default function Scene() {
+  const [flyingDarts, setFlyingDarts] = useState<FlyingDartData[]>([]);
+  const [stuckDarts, setStuckDarts] = useState<ThrownDart[]>([]);
+
+  const handleDartThrow = (position: [number, number, number]) => {
+    const dartId = `${Date.now()}-${Math.random()}`;
+
+    // 먼저 날아가는 다트로 추가
+    setFlyingDarts((prev) => [
+      ...prev,
+      {
+        id: dartId,
+        position,
+      },
+    ]);
+
+    // 애니메이션 시간 후 꽂힌 다트로 이동
+    setTimeout(() => {
+      setFlyingDarts((prev) => prev.filter((d) => d.id !== dartId));
+      setStuckDarts((prev) => [...prev, { id: dartId, position }]);
+    }, 700);
   };
 
   return (
     <>
+      {/* DART_THROW 이벤트 핸들러 */}
+      <DartEventHandler onDartThrow={handleDartThrow} />
+
       {/* 기본 조명 - 전체 밝기 */}
       <ambientLight intensity={1.5} />
 
@@ -150,50 +221,16 @@ export default function Scene() {
       {/* 상단 전체 조명 */}
       <directionalLight position={[0, 20, 15]} intensity={0.5} />
 
-      {/* 머신(배경) */}
-      <MachineProcedural targetZ={0} scale={1} />
-
-      {/* 8줄 x 6열 = 48개 모델 렌더링 (히트되지 않은 것만) */}
-      {Array.from({ length: rows }).map((_, rowIndex) =>
-        Array.from({ length: cols }).map((_, colIndex) => {
-          const targetId = `${rowIndex}-${colIndex}`;
-
-          // 이미 맞은 타겟은 렌더링하지 않음
-          if (hitTargets.has(targetId)) {
-            return null;
-          }
-
-          // 각 칸의 중심 위치
-          const cellCenterX = gridStartX + cellWidth * (colIndex + 0.5);
-
-          // 각 칸의 바닥 위치 (중력 느낌)
-          const cellBottomY = gridStartY - cellHeight * (rowIndex + 1);
-          // 모델 높이의 절반만큼 위로 올려서 바닥에 닿게 함
-          const y = cellBottomY + 0.8; // 0.8은 모델 높이의 절반 (조정 가능)
-
-          const modelIndex = (rowIndex * cols + colIndex) % models.length;
-
-          return (
-            <Target
-              key={targetId}
-              modelPath={models[modelIndex]}
-              position={[cellCenterX, y, 0]}
-            />
-          );
-        })
-      )}
-
-      {/* 히트 이펙트 렌더링 */}
-      {hitEffects.map((effect) => (
-        <HitEffect
-          key={effect.id}
-          position={effect.position}
-          onComplete={() => handleEffectComplete(effect.id)}
-        />
-      ))}
+      {/* 룰렛 모델 */}
+      <RotatingRoulette flyingDarts={flyingDarts} stuckDarts={stuckDarts} />
 
       {/* 개발용 – 현장 배포 전 제거 */}
       <OrbitControls enableZoom={false} />
     </>
   );
 }
+
+// 룰렛 모델 프리로드
+useGLTF.preload("/models/roulette.glb");
+// 다트 모델 프리로드
+useGLTF.preload("/models/dart.glb");

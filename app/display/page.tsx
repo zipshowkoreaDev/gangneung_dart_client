@@ -1,4 +1,3 @@
-/* eslint-disable react-hooks/exhaustive-deps */
 "use client";
 
 import { useEffect, useMemo, useState, useCallback } from "react";
@@ -49,9 +48,6 @@ export default function DisplayPage() {
   const [isMounted, setIsMounted] = useState(false);
   const [room, setRoom] = useState("");
   const [aimPositions, setAimPositions] = useState<AimState>(() => new Map());
-  const [debugLogs, setDebugLogs] = useState<string[]>([]);
-  const [isConnected, setIsConnected] = useState(false);
-  const [socketUrl, setSocketUrl] = useState("");
 
   // 디버깅: 컴포넌트 마운트/언마운트 추적
   useEffect(() => {
@@ -66,22 +62,26 @@ export default function DisplayPage() {
         timestamp: new Date().toLocaleTimeString(),
       });
     };
-  }, []); // 빈 배열: 마운트/언마운트 시에만 실행
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const addLog = useCallback((msg: string) => {
     const timestamp = new Date().toLocaleTimeString();
-    setDebugLogs((prev) => [...prev.slice(-15), `[${timestamp}] ${msg}`]);
+    console.log(`[${timestamp}] ${msg}`);
   }, []);
 
   // 1) hydration mismatch 방지: client mount 후 room 생성
   useEffect(() => {
-    setIsMounted(true);
+    setTimeout(() => {
+      setIsMounted(true);
 
-    // room은 항상 "zipshow"로 고정
-    const fixedRoom = "zipshow";
-    setRoom(fixedRoom);
-    addLog(`🎯 Room 고정: ${fixedRoom}`);
-  }, [addLog]);
+      // room은 항상 "zipshow"로 고정
+      const fixedRoom = "zipshow";
+      setRoom(fixedRoom);
+      addLog(`🎯 Room 고정: ${fixedRoom}`);
+    }, 0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // 2) QR 링크 생성: 하나의 QR 코드만 생성
   const mobileUrl = useMemo(() => {
@@ -105,10 +105,6 @@ export default function DisplayPage() {
   useEffect(() => {
     if (!room) return;
 
-    // Socket URL 저장
-    const url = `${window.location.protocol}//${window.location.host}`;
-    setSocketUrl(url);
-
     console.log("🔌 Socket useEffect 실행", {
       room,
       connected: socket.connected,
@@ -117,15 +113,12 @@ export default function DisplayPage() {
 
     // 소켓 연결
     if (!socket.connected) {
-      addLog(`소켓 연결 시도 중... (${url})`);
+      addLog(`소켓 연결 시도 중...`);
       socket.connect();
     }
 
     const onConnect = () => {
-      setIsConnected(true);
       addLog(`✅ 소켓 연결 성공: ${socket.id}`);
-      // Display는 특별한 name으로 구분 (서버가 플레이어 카운트에서 제외하도록)
-      // 언더스코어로 시작하는 이름은 시스템 클라이언트로 간주
       socket.emit("joinRoom", { room, name: "_display" });
       addLog(`🚪 Room 참가 요청: ${room} (Display 모드)`);
     };
@@ -133,12 +126,10 @@ export default function DisplayPage() {
     socket.on("connect", onConnect);
 
     const onConnectError = (err: Error) => {
-      setIsConnected(false);
       addLog(`❌ 연결 에러: ${err.message}`);
     };
 
     const onDisconnect = (reason: string) => {
-      setIsConnected(false);
       addLog(`⚠️ 연결 끊김: ${reason}`);
     };
 
@@ -158,14 +149,18 @@ export default function DisplayPage() {
     const onJoinedRoom = (data: { room: string; playerCount: number }) => {
       // Display 자신을 제외한 실제 플레이어 수
       const actualPlayerCount = Math.max(0, data.playerCount - 1);
-      addLog(`✅ 방 참가 완료: ${data.room}, 플레이어 수: ${actualPlayerCount}명`);
+      addLog(
+        `✅ 방 참가 완료: ${data.room}, 플레이어 수: ${actualPlayerCount}명`
+      );
     };
 
     // 문서 스펙: roomPlayerCount 수신
     const onRoomPlayerCount = (data: { room: string; playerCount: number }) => {
       // Display 자신을 제외한 실제 플레이어 수 (Display는 플레이어가 아님)
       const actualPlayerCount = Math.max(0, data.playerCount - 1);
-      addLog(`👥 플레이어 수 변경: ${actualPlayerCount}명 (서버: ${data.playerCount}명)`);
+      addLog(
+        `👥 플레이어 수 변경: ${actualPlayerCount}명 (서버: ${data.playerCount}명)`
+      );
     };
 
     socket.on("clientInfo", onClientInfo);
@@ -255,55 +250,6 @@ export default function DisplayPage() {
         overflow: "hidden",
       }}
     >
-      {/* 디버그 패널 */}
-      {isMounted && (
-        <div
-          style={{
-            position: "fixed",
-            top: 10,
-            left: 10,
-            zIndex: 10,
-            background: "rgba(0, 0, 0, 0.9)",
-            color: "white",
-            padding: "10px 15px",
-            borderRadius: 8,
-            fontFamily: "monospace",
-            fontSize: "12px",
-            maxWidth: "400px",
-            maxHeight: "50vh",
-            overflowY: "auto",
-          }}
-        >
-          <div style={{ fontWeight: "bold", marginBottom: "8px" }}>
-            🔧 Display 디버그
-          </div>
-          <div style={{ marginBottom: "4px" }}>
-            연결: {isConnected ? "🟢" : "🔴"} | Room: {room || "없음"}
-          </div>
-          <div style={{ marginBottom: "4px", fontSize: "10px", opacity: 0.8 }}>
-            Socket: {socketUrl}
-          </div>
-          <div style={{ marginBottom: "4px" }}>
-            조준점: {aimPositions.size}개
-          </div>
-          <div
-            style={{
-              marginTop: "8px",
-              borderTop: "1px solid #444",
-              paddingTop: "4px",
-              fontSize: "10px",
-            }}
-          >
-            <strong>로그:</strong>
-            {debugLogs.map((log, idx) => (
-              <div key={idx} style={{ opacity: 0.9 }}>
-                {log}
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
       {/* QR 카드 */}
       <div
         style={{
@@ -436,7 +382,6 @@ export default function DisplayPage() {
         camera={{
           position: [0, 0, 50],
           fov: 50,
-          aspect: 9 / 16,
         }}
         dpr={[1, 2]}
         gl={{ antialias: true }}

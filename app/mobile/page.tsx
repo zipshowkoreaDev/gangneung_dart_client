@@ -20,14 +20,11 @@ interface DeviceOrientationEventiOS {
 
 export default function MobilePage() {
   const [room, setRoom] = useState("");
-  const [playerId, setPlayerId] = useState("");
+  const [customName, setCustomName] = useState(""); // 사용자 입력 이름 (필수)
 
-  const [status, setStatus] = useState("대기중");
   const [isReady, setIsReady] = useState(false);
-  const [aim, setAim] = useState({ x: 0, y: 0 }); // -1..1
-  const [debugLogs, setDebugLogs] = useState<string[]>([]);
-  const [isConnected, setIsConnected] = useState(false);
-  const [socketUrl, setSocketUrl] = useState("");
+  const [isThrowing, setIsThrowing] = useState(false); // 다트 던지는 중
+  const [isRoomFull, setIsRoomFull] = useState(false);
 
   /* -------------------- refs -------------------- */
   const sensorsActiveRef = useRef(false);
@@ -64,7 +61,7 @@ export default function MobilePage() {
   /* -------------------- debug log -------------------- */
   const addLog = useCallback((msg: string) => {
     const timestamp = new Date().toLocaleTimeString();
-    setDebugLogs((prev) => [...prev.slice(-20), `[${timestamp}] ${msg}`]);
+    console.log(`[${timestamp}] ${msg}`);
   }, []);
 
   /* -------------------- init -------------------- */
@@ -72,59 +69,55 @@ export default function MobilePage() {
     // room은 항상 "zipshow"로 고정
     const r = "zipshow";
     setRoom(r);
-
-    // 초기 playerId는 임시 (서버에서 자동 할당받음)
-    setPlayerId("대기중...");
-
-    addLog(`Room: ${r}, 플레이어 이름 대기 중...`);
+    addLog(`Room: ${r}`);
   }, [addLog]);
 
   /* -------------------- socket -------------------- */
   useEffect(() => {
     if (!room) return;
 
-    // Socket URL 저장
-    const url = `${window.location.protocol}//${window.location.host}`;
-    setSocketUrl(url);
-
-    addLog(`소켓 연결 시도 중... (${url})`);
+    addLog(`소켓 연결 시도 중...`);
     socket.connect();
 
     socket.on("connect", () => {
-      setIsConnected(true);
       addLog(`✅ 소켓 연결 성공: ${socket.id}`);
 
-      // 문서 스펙: name 없이 joinRoom (서버가 자동 할당)
+      // joinRoom 요청 (사용자 입력 이름 사용)
       socket.emit("joinRoom", {
         room,
+        name: customName,
       });
-      addLog(`🚪 Room 참가 요청: ${room} (이름 자동 할당)`);
+      addLog(`🚪 Room 참가 요청: ${room}, 이름: ${customName}`);
     });
 
     socket.on("connect_error", (err) => {
-      setIsConnected(false);
       addLog(`❌ 연결 에러: ${err.message}`);
       console.error("❌ socket error:", err);
     });
 
     socket.on("disconnect", (reason) => {
-      setIsConnected(false);
       addLog(`⚠️ 연결 끊김: ${reason}`);
     });
 
-    // 문서 스펙: clientInfo 수신 (서버가 할당한 이름 받기)
+    // 문서 스펙: clientInfo 수신
     socket.on(
       "clientInfo",
       (data: { socketId: string; name: string; room: string }) => {
-        setPlayerId(data.name);
-        addLog(`📋 클라이언트 정보: ${data.name} (${data.socketId})`);
-        setStatus(`${data.name}로 할당됨`);
+        addLog(`📋 클라이언트 정보: ${data.socketId}`);
       }
     );
 
     // 문서 스펙: joinedRoom 수신
     socket.on("joinedRoom", (data: { room: string; playerCount: number }) => {
       addLog(`✅ 방 참가 완료: ${data.room}, 플레이어 수: ${data.playerCount}`);
+
+      // 최대 2명까지만 허용 (Display 제외)
+      // playerCount > 3 = Display(1) + 3명 이상 = 방이 가득 함
+      if (data.playerCount > 3) {
+        setIsRoomFull(true);
+        addLog(`⚠️ 방이 가득 참: ${data.playerCount}명 (최대 3명)`);
+        socket.disconnect();
+      }
     });
 
     // 문서 스펙: roomPlayerCount 수신
@@ -132,6 +125,13 @@ export default function MobilePage() {
       "roomPlayerCount",
       (data: { room: string; playerCount: number }) => {
         addLog(`👥 플레이어 수 변경: ${data.playerCount}명`);
+
+        // 플레이어 수가 증가하여 방이 가득 찰 경우
+        if (data.playerCount > 3 && !isRoomFull) {
+          setIsRoomFull(true);
+          addLog(`⚠️ 방이 가득 참: ${data.playerCount}명 (최대 3명)`);
+          socket.disconnect();
+        }
       }
     );
 
@@ -150,7 +150,7 @@ export default function MobilePage() {
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [room, playerId, addLog]);
+  }, [room, customName, addLog]);
 
   /* -------------------- utils -------------------- */
   const norm = (v: number, a: number, b: number) =>
@@ -232,15 +232,13 @@ export default function MobilePage() {
       handleMotionRef.current = null;
     }
 
-    if (socket.connected) {
+    if (socket.connected && customName) {
       socket.emit("aim-off", {
         room,
-        name: playerId,
+        name: customName,
       });
     }
-
-    setStatus("대기중");
-  }, [room, playerId]);
+  }, [room, customName]);
 
   /* -------------------- start sensors -------------------- */
   const startSensors = () => {
@@ -250,7 +248,6 @@ export default function MobilePage() {
     sensorsActiveRef.current = true;
     readyRef.current = true;
     setIsReady(true);
-    setStatus("조준 중… 앞으로 휘두르면 던집니다.");
 
     accPeakRef.current = 0;
     armedAtRef.current = performance.now();
@@ -269,10 +266,9 @@ export default function MobilePage() {
       const y0 = norm(b, 10, 80);
       const faceUp =
         Math.abs(gravityZRef.current) > 4 && gravityZRef.current < 0;
-      const y = faceUp ? y0 : -y0;
+      const y = faceUp ? -y0 : y0; // Y축 반전
 
       const aimValue = { x, y };
-      setAim(aimValue);
       aimRef.current = aimValue;
       aimReadyRef.current = true;
 
@@ -287,18 +283,19 @@ export default function MobilePage() {
       if (
         readyRef.current &&
         socket.connected &&
+        customName &&
         now - lastAimSentRef.current > AIM_INTERVAL &&
         now >= aimBlockedUntilRef.current
       ) {
         lastAimSentRef.current = now;
         socket.emit("aim-update", {
           room,
-          name: playerId,
+          name: customName,
           skin,
           aim: { x, y },
         });
         if (now - armedAtRef.current < 2000) {
-          addLog(`📡 aim-update 전송 (room=${room}, player=${playerId})`);
+          addLog(`📡 aim-update 전송 (room=${room}, player=${customName})`);
         }
       }
     };
@@ -357,8 +354,16 @@ export default function MobilePage() {
       addLog("⚠️ 소켓 연결 끊김 - 던지기 실패");
       return;
     }
+    if (!customName) {
+      addLog("⚠️ 플레이어 이름 미입력 - 던지기 실패");
+      return;
+    }
 
     readyRef.current = false;
+
+    // 다트 던지기 애니메이션 시작
+    setIsThrowing(true);
+    setTimeout(() => setIsThrowing(false), 1000); // 1초 후 리셋
 
     const power = Math.max(0, Math.min(1, accPeakRef.current / 25));
     // 던지는 순간의 정확한 aim 좌표 사용
@@ -372,18 +377,12 @@ export default function MobilePage() {
     // 문서 스펙: throw-dart 이벤트 (score는 임시로 0 또는 계산된 값)
     socket.emit("throw-dart", {
       room,
-      name: playerId,
+      name: customName,
       aim: currentAim,
       score: Math.round(power * 100),
     });
 
-    setStatus(
-      `던짐! power=${power.toFixed(2)} aim=(${currentAim.x.toFixed(
-        2
-      )}, ${currentAim.y.toFixed(2)})`
-    );
-
-    socket.emit("aim-off", { room, name: playerId });
+    socket.emit("aim-off", { room, name: customName });
     aimBlockedUntilRef.current = performance.now() + 1200;
 
     accPeakRef.current = 0;
@@ -396,7 +395,6 @@ export default function MobilePage() {
       if (sensorsActiveRef.current) {
         readyRef.current = true;
         armedAtRef.current = performance.now();
-        setStatus("조준 중… 앞으로 휘두르면 던집니다.");
       }
     }, 500);
   };
@@ -424,54 +422,6 @@ export default function MobilePage() {
         overflow: "hidden",
       }}
     >
-      {/* 디버그 패널 */}
-      <div
-        style={{
-          position: "absolute",
-          top: 0,
-          left: 0,
-          right: 0,
-          zIndex: 100,
-          background: "rgba(0, 0, 0, 0.85)",
-          color: "#fff",
-          padding: "8px 12px",
-          fontSize: "11px",
-          fontFamily: "monospace",
-          maxHeight: "40vh",
-          overflowY: "auto",
-        }}
-      >
-        <div
-          style={{ marginBottom: "4px", fontWeight: "bold", fontSize: "12px" }}
-        >
-          🔧 디버그 정보
-        </div>
-        <div style={{ marginBottom: "4px" }}>
-          연결 상태: {isConnected ? "🟢 연결됨" : "🔴 연결 안됨"}
-        </div>
-        <div style={{ marginBottom: "4px" }}>Room: {room || "없음"}</div>
-        <div style={{ marginBottom: "4px" }}>Player: {playerId || "없음"}</div>
-        <div style={{ marginBottom: "4px" }}>
-          Socket URL: {socketUrl || "N/A"}
-        </div>
-        <div
-          style={{
-            marginTop: "8px",
-            borderTop: "1px solid #444",
-            paddingTop: "4px",
-          }}
-        >
-          <strong>로그:</strong>
-          {debugLogs.length === 0 && (
-            <div style={{ opacity: 0.6 }}>로그 없음</div>
-          )}
-          {debugLogs.map((log, idx) => (
-            <div key={idx} style={{ fontSize: "10px", opacity: 0.9 }}>
-              {log}
-            </div>
-          ))}
-        </div>
-      </div>
       {/* ✅ 3D 다트 프리뷰 (배경처럼) */}
       <div
         style={{
@@ -486,7 +436,7 @@ export default function MobilePage() {
           gl={{ antialias: true }}
         >
           <group position={[0, -0.2, 0]} scale={1.1}>
-            <DartPreview />
+            <DartPreview show={isReady} throwing={isThrowing} />
           </group>
         </Canvas>
       </div>
@@ -499,32 +449,6 @@ export default function MobilePage() {
           height: "100%",
         }}
       >
-        {isReady && (
-          <div
-            style={{
-              position: "absolute",
-              bottom: 20,
-              left: "50%",
-              transform: "translateX(-50%)",
-              zIndex: 50,
-              background: "rgba(0, 0, 0, 0.8)",
-              color: "white",
-              padding: "12px 20px",
-              borderRadius: 8,
-              fontFamily: "monospace",
-              fontSize: "14px",
-              textAlign: "center",
-            }}
-          >
-            <div>
-              조준: ({aim.x.toFixed(2)}, {aim.y.toFixed(2)})
-            </div>
-            <div style={{ fontSize: "12px", opacity: 0.8, marginTop: "4px" }}>
-              {status}
-            </div>
-          </div>
-        )}
-
         {!isReady && (
           <div
             style={{
@@ -538,36 +462,100 @@ export default function MobilePage() {
               padding: "0 20px",
             }}
           >
-            <div style={{ fontSize: "18px", fontWeight: 600 }}>
-              휴대폰을 기울여 조준하세요
-            </div>
+            {isRoomFull ? (
+              <>
+                <div
+                  style={{
+                    fontSize: "24px",
+                    fontWeight: 700,
+                    color: "#ff3d00",
+                  }}
+                >
+                  방이 가득 찼습니다
+                </div>
+                <div
+                  style={{ fontSize: "14px", opacity: 0.7, lineHeight: 1.5 }}
+                >
+                  최대 2명까지만 참가할 수 있습니다.
+                  <br />
+                  다른 플레이어가 나갈 때까지 기다려주세요.
+                </div>
+              </>
+            ) : (
+              <>
+                <div style={{ fontSize: "18px", fontWeight: 600 }}>
+                  이름을 입력하세요
+                </div>
 
-            <div style={{ fontSize: "14px", opacity: 0.7, lineHeight: 1.5 }}>
-              화면에 보이는 다트는 회전 중입니다.
-              <br />
-              시작을 누르면 조준이 디스플레이에 표시됩니다.
-            </div>
+                {/* 이름 입력 필드 */}
+                <input
+                  type="text"
+                  value={customName}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    // 5글자 제한
+                    if (value.length <= 5) {
+                      setCustomName(value);
+                    }
+                  }}
+                  placeholder="최대 5글자"
+                  maxLength={5}
+                  style={{
+                    width: "200px",
+                    padding: "12px 16px",
+                    fontSize: "16px",
+                    fontWeight: "500",
+                    borderRadius: "8px",
+                    border: "2px solid rgba(255, 255, 255, 0.3)",
+                    background: "rgba(255, 255, 255, 0.1)",
+                    color: "white",
+                    textAlign: "center",
+                    outline: "none",
+                    backdropFilter: "blur(10px)",
+                  }}
+                />
 
-            {/* ✅ 시작 버튼 */}
-            <button
-              onClick={handleStart}
-              style={{
-                marginTop: "12px",
-                padding: "16px 28px",
-                fontSize: "18px",
-                fontWeight: "bold",
-                borderRadius: "999px",
-                border: "none",
-                background: "linear-gradient(135deg, #ff7a18 0%, #ff3d00 100%)",
-                color: "white",
-                cursor: "pointer",
-                boxShadow: "0 8px 24px rgba(0,0,0,0.35)",
-              }}
-            >
-              시작
-            </button>
+                <div
+                  style={{ fontSize: "14px", opacity: 0.7, lineHeight: 1.5 }}
+                >
+                  이름을 입력하고 시작 버튼을 누르세요.
+                  <br />
+                  휴대폰을 기울여 조준할 수 있습니다.
+                </div>
+              </>
+            )}
           </div>
         )}
+
+        {/* 시작/종료 버튼 - 항상 같은 위치 */}
+        <button
+          onClick={isReady ? stopSensors : handleStart}
+          disabled={!isReady && (isRoomFull || !customName)}
+          style={{
+            position: "absolute",
+            bottom: 20,
+            left: "50%",
+            transform: "translateX(-50%)",
+            zIndex: 50,
+            padding: "16px 28px",
+            fontSize: "18px",
+            fontWeight: "bold",
+            borderRadius: "999px",
+            border: "none",
+            background:
+              !isReady && (isRoomFull || !customName)
+                ? "#666"
+                : isReady
+                ? "linear-gradient(135deg, #666 0%, #444 100%)"
+                : "linear-gradient(135deg, #ff7a18 0%, #ff3d00 100%)",
+            color: "white",
+            cursor: !isReady && (isRoomFull || !customName) ? "not-allowed" : "pointer",
+            boxShadow: "0 8px 24px rgba(0,0,0,0.35)",
+            opacity: !isReady && (isRoomFull || !customName) ? 0.5 : 1,
+          }}
+        >
+          {isReady ? "종료하기" : "시작"}
+        </button>
       </div>
     </div>
   );
