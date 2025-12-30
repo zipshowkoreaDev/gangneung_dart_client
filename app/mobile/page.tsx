@@ -23,8 +23,11 @@ export default function MobilePage() {
   const [customName, setCustomName] = useState(""); // 사용자 입력 이름 (필수)
 
   const [isReady, setIsReady] = useState(false);
-  const [isThrowing, setIsThrowing] = useState(false); // 다트 던지는 중
+  const [isThrowing, setIsThrowing] = useState(false);
   const [isRoomFull, setIsRoomFull] = useState(false);
+  const [isMyTurn, setIsMyTurn] = useState(false);
+  const [isSoloMode, setIsSoloMode] = useState(false);
+  const [isRejected, setIsRejected] = useState(false);
 
   /* -------------------- refs -------------------- */
   const sensorsActiveRef = useRef(false);
@@ -58,78 +61,108 @@ export default function MobilePage() {
   const AIM_HZ = 30;
   const AIM_INTERVAL = 1000 / AIM_HZ;
 
-  /* -------------------- debug log -------------------- */
   const addLog = useCallback((msg: string) => {
     const timestamp = new Date().toLocaleTimeString();
     console.log(`[${timestamp}] ${msg}`);
   }, []);
 
-  /* -------------------- init -------------------- */
   useEffect(() => {
-    // room은 항상 "zipshow"로 고정
-    const r = "zipshow";
-    setRoom(r);
-    addLog(`Room: ${r}`);
+    const urlParams = new URLSearchParams(window.location.search);
+    const roomFromUrl = urlParams.get("room");
+
+    if (roomFromUrl) {
+      setRoom(roomFromUrl);
+      addLog(`Room from URL: ${roomFromUrl}`);
+    } else {
+      const r = "zipshow";
+      setRoom(r);
+      addLog(`Room fallback: ${r}`);
+    }
   }, [addLog]);
 
-  /* -------------------- socket -------------------- */
   useEffect(() => {
     if (!room) return;
 
-    addLog(`소켓 연결 시도 중...`);
     socket.connect();
 
     socket.on("connect", () => {
-      addLog(`✅ 소켓 연결 성공: ${socket.id}`);
-
-      // joinRoom 요청 (사용자 입력 이름 사용)
+      addLog(`Socket connected: ${socket.id}`);
       socket.emit("joinRoom", {
         room,
         name: customName,
       });
-      addLog(`🚪 Room 참가 요청: ${room}, 이름: ${customName}`);
     });
 
     socket.on("connect_error", (err) => {
-      addLog(`❌ 연결 에러: ${err.message}`);
-      console.error("❌ socket error:", err);
+      addLog(`Connection error: ${err.message}`);
+      console.error("Socket error:", err);
     });
 
     socket.on("disconnect", (reason) => {
-      addLog(`⚠️ 연결 끊김: ${reason}`);
+      addLog(`Disconnected: ${reason}`);
     });
 
-    // 문서 스펙: clientInfo 수신
     socket.on(
       "clientInfo",
       (data: { socketId: string; name: string; room: string }) => {
-        addLog(`📋 클라이언트 정보: ${data.socketId}`);
+        addLog(`Client info received: ${data.socketId}`);
       }
     );
 
-    // 문서 스펙: joinedRoom 수신
     socket.on("joinedRoom", (data: { room: string; playerCount: number }) => {
-      addLog(`✅ 방 참가 완료: ${data.room}, 플레이어 수: ${data.playerCount}`);
+      addLog(`Room joined: ${data.room}, Players: ${data.playerCount}`);
 
-      // 최대 2명까지만 허용 (Display 제외)
-      // playerCount > 3 = Display(1) + 3명 이상 = 방이 가득 함
       if (data.playerCount > 3) {
         setIsRoomFull(true);
-        addLog(`⚠️ 방이 가득 참: ${data.playerCount}명 (최대 3명)`);
+        addLog(`Room full: ${data.playerCount} players (max 3)`);
         socket.disconnect();
       }
     });
 
-    // 문서 스펙: roomPlayerCount 수신
     socket.on(
       "roomPlayerCount",
       (data: { room: string; playerCount: number }) => {
-        addLog(`👥 플레이어 수 변경: ${data.playerCount}명`);
+        addLog(`Player count: ${data.playerCount}`);
 
-        // 플레이어 수가 증가하여 방이 가득 찰 경우
         if (data.playerCount > 3 && !isRoomFull) {
           setIsRoomFull(true);
-          addLog(`⚠️ 방이 가득 참: ${data.playerCount}명 (최대 3명)`);
+          addLog(`Room full: ${data.playerCount} players (max 3)`);
+          socket.disconnect();
+        }
+      }
+    );
+
+    socket.on(
+      "turn-update",
+      (data: { room: string; currentTurn: string | null }) => {
+        if (data.room !== room) return;
+
+        const isMyTurnNow = data.currentTurn === customName;
+        setIsMyTurn(isMyTurnNow);
+        addLog(`Turn: ${data.currentTurn || "none"}${isMyTurnNow ? " (My turn)" : ""}`);
+      }
+    );
+
+    socket.on("solo-mode-started", (data: { room: string; player: string }) => {
+      if (data.room !== room) return;
+
+      const isSoloPlayer = data.player === customName;
+      setIsSoloMode(true);
+      if (isSoloPlayer) {
+        setIsMyTurn(true);
+      }
+      addLog(`Solo mode: ${data.player}${isSoloPlayer ? " (Me)" : ""}`);
+    });
+
+    socket.on(
+      "player-rejected",
+      (data: { room: string; name: string; reason: string }) => {
+        if (data.room !== room || data.name !== customName) return;
+
+        addLog(`Player rejected: ${data.reason}`);
+        if (data.reason === "solo-mode") {
+          setIsRejected(true);
+          setIsRoomFull(true);
           socket.disconnect();
         }
       }
@@ -143,8 +176,10 @@ export default function MobilePage() {
       socket.off("clientInfo");
       socket.off("joinedRoom");
       socket.off("roomPlayerCount");
+      socket.off("turn-update");
+      socket.off("solo-mode-started");
+      socket.off("player-rejected");
 
-      // 개발 모드에서는 HMR로 인한 재연결 방지
       if (process.env.NODE_ENV === "production") {
         socket.disconnect();
       }
@@ -152,67 +187,58 @@ export default function MobilePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [room, customName, addLog]);
 
-  /* -------------------- utils -------------------- */
   const norm = (v: number, a: number, b: number) =>
     Math.max(-1, Math.min(1, ((v - a) / (b - a)) * 2 - 1));
 
-  /* -------------------- permission -------------------- */
   const requestMotionPermission = async (): Promise<boolean> => {
     try {
-      // 플랫폼 감지
       const isIOS =
         /iPad|iPhone|iPod/.test(navigator.userAgent) ||
         (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
-      addLog(`플랫폼: ${isIOS ? "iOS" : "Android/기타"}`);
+      addLog(`Platform: ${isIOS ? "iOS" : "Android"}`);
 
-      // iOS 13+ 권한 요청
       if (
         typeof DeviceMotionEvent !== "undefined" &&
         "requestPermission" in DeviceMotionEvent
       ) {
-        addLog("DeviceMotionEvent 권한 요청 중...");
+        addLog("Requesting DeviceMotion permission...");
         const DeviceMotion =
           DeviceMotionEvent as unknown as DeviceMotionEventiOS;
         if (DeviceMotion.requestPermission) {
           const result = await DeviceMotion.requestPermission();
-          addLog(`DeviceMotionEvent 권한 결과: ${result}`);
+          addLog(`DeviceMotion permission: ${result}`);
           if (result !== "granted") {
-            addLog("❌ 모션 권한 거부됨");
+            addLog("Motion permission denied");
             return false;
           }
         }
-      } else {
-        addLog("DeviceMotionEvent 권한 불필요 (Android 또는 구형 iOS)");
       }
 
       if (
         typeof DeviceOrientationEvent !== "undefined" &&
         "requestPermission" in DeviceOrientationEvent
       ) {
-        addLog("DeviceOrientationEvent 권한 요청 중...");
+        addLog("Requesting DeviceOrientation permission...");
         const DeviceOrientation =
           DeviceOrientationEvent as unknown as DeviceOrientationEventiOS;
         if (DeviceOrientation.requestPermission) {
           const result = await DeviceOrientation.requestPermission();
-          addLog(`DeviceOrientationEvent 권한 결과: ${result}`);
+          addLog(`DeviceOrientation permission: ${result}`);
           if (result !== "granted") {
-            addLog("❌ 방향 권한 거부됨");
+            addLog("Orientation permission denied");
             return false;
           }
         }
-      } else {
-        addLog("DeviceOrientationEvent 권한 불필요");
       }
 
-      addLog("✅ 모든 권한 허용됨");
+      addLog("All permissions granted");
       return true;
     } catch (e) {
-      addLog(`❌ 권한 요청 오류: ${e}`);
+      addLog(`Permission error: ${e}`);
       return false;
     }
   };
 
-  /* -------------------- stop sensors -------------------- */
   const stopSensors = useCallback(() => {
     if (!sensorsActiveRef.current) return;
 
@@ -240,11 +266,10 @@ export default function MobilePage() {
     }
   }, [room, customName]);
 
-  /* -------------------- start sensors -------------------- */
   const startSensors = () => {
     if (sensorsActiveRef.current) return;
 
-    addLog("🎮 센서 시작");
+    addLog("Sensors started");
     sensorsActiveRef.current = true;
     readyRef.current = true;
     setIsReady(true);
@@ -256,7 +281,6 @@ export default function MobilePage() {
     prevMagRef.current = 0;
     aimReadyRef.current = false;
 
-    /* orientation → aim */
     let orientationCount = 0;
     handleOrientationRef.current = (e: DeviceOrientationEvent) => {
       const g = e.gamma ?? 0;
@@ -266,7 +290,7 @@ export default function MobilePage() {
       const y0 = norm(b, 10, 80);
       const faceUp =
         Math.abs(gravityZRef.current) > 4 && gravityZRef.current < 0;
-      const y = faceUp ? -y0 : y0; // Y축 반전
+      const y = faceUp ? -y0 : y0;
 
       const aimValue = { x, y };
       aimRef.current = aimValue;
@@ -274,9 +298,7 @@ export default function MobilePage() {
 
       orientationCount++;
       if (orientationCount === 1) {
-        addLog(
-          `📱 자이로 이벤트 발생! gamma=${g.toFixed(1)}, beta=${b.toFixed(1)}`
-        );
+        addLog(`Gyro active: gamma=${g.toFixed(1)}, beta=${b.toFixed(1)}`);
       }
 
       const now = performance.now();
@@ -294,13 +316,9 @@ export default function MobilePage() {
           skin,
           aim: { x, y },
         });
-        if (now - armedAtRef.current < 2000) {
-          addLog(`📡 aim-update 전송 (room=${room}, player=${customName})`);
-        }
       }
     };
 
-    /* motion → throw */
     handleMotionRef.current = (e: DeviceMotionEvent) => {
       const ag = e.accelerationIncludingGravity || { x: 0, y: 0, z: 0 };
       gravityZRef.current = ag.z || 0;
@@ -335,46 +353,48 @@ export default function MobilePage() {
       }
     };
 
-    addLog("🔧 이벤트 리스너 등록 시작...");
     window.addEventListener("deviceorientation", handleOrientationRef.current);
     window.addEventListener("devicemotion", handleMotionRef.current);
-    addLog("✅ 이벤트 리스너 등록 완료");
+    addLog("Event listeners registered");
 
     setTimeout(() => {
       if (orientationCount === 0) {
-        addLog("⚠️ 자이로 이벤트가 발생하지 않음! 권한을 확인하세요.");
+        addLog("Warning: No gyro events. Check permissions.");
       }
     }, 2000);
   };
 
-  /* -------------------- throw -------------------- */
   const throwDart = () => {
     if (!readyRef.current) return;
     if (!socket.connected) {
-      addLog("⚠️ 소켓 연결 끊김 - 던지기 실패");
+      addLog("Throw failed: Socket disconnected");
       return;
     }
     if (!customName) {
-      addLog("⚠️ 플레이어 이름 미입력 - 던지기 실패");
+      addLog("Throw failed: No player name");
+      return;
+    }
+    if (!isSoloMode && !isMyTurn) {
+      addLog("Throw failed: Not your turn");
       return;
     }
 
     readyRef.current = false;
 
-    // 다트 던지기 애니메이션 시작
+    const throwSound = new Audio("/sound/throw.mp3");
+    throwSound.play().catch((e) => console.error("Sound play failed:", e));
+
     setIsThrowing(true);
-    setTimeout(() => setIsThrowing(false), 1000); // 1초 후 리셋
+    setTimeout(() => setIsThrowing(false), 1000);
 
     const power = Math.max(0, Math.min(1, accPeakRef.current / 25));
-    // 던지는 순간의 정확한 aim 좌표 사용
     const currentAim = aimRef.current;
 
     addLog(
-      `🎯 다트 던짐! power=${power.toFixed(2)} aim=(${currentAim.x.toFixed(
+      `Dart thrown: power=${power.toFixed(2)} aim=(${currentAim.x.toFixed(
         2
       )}, ${currentAim.y.toFixed(2)})`
     );
-    // 문서 스펙: throw-dart 이벤트 (score는 임시로 0 또는 계산된 값)
     socket.emit("throw-dart", {
       room,
       name: customName,
@@ -400,13 +420,13 @@ export default function MobilePage() {
   };
 
   const handleStart = async () => {
-    addLog("🔑 모션 권한 요청 중...");
+    addLog("Requesting motion permissions...");
     const ok = await requestMotionPermission();
     if (!ok) {
-      addLog("❌ 모션 권한 거부됨");
+      addLog("Motion permissions denied");
       return;
     }
-    addLog("✅ 모션 권한 허용됨");
+    addLog("Motion permissions granted");
     startSensors();
   };
 
@@ -471,14 +491,24 @@ export default function MobilePage() {
                     color: "#ff3d00",
                   }}
                 >
-                  방이 가득 찼습니다
+                  {isRejected ? "입장이 거부되었습니다" : "방이 가득 찼습니다"}
                 </div>
                 <div
                   style={{ fontSize: "14px", opacity: 0.7, lineHeight: 1.5 }}
                 >
-                  최대 2명까지만 참가할 수 있습니다.
-                  <br />
-                  다른 플레이어가 나갈 때까지 기다려주세요.
+                  {isRejected ? (
+                    <>
+                      현재 혼자하기 모드로 게임이 진행 중입니다.
+                      <br />
+                      다른 방에 입장해주세요.
+                    </>
+                  ) : (
+                    <>
+                      최대 2명까지만 참가할 수 있습니다.
+                      <br />
+                      다른 플레이어가 나갈 때까지 기다려주세요.
+                    </>
+                  )}
                 </div>
               </>
             ) : (
@@ -549,7 +579,10 @@ export default function MobilePage() {
                 ? "linear-gradient(135deg, #666 0%, #444 100%)"
                 : "linear-gradient(135deg, #ff7a18 0%, #ff3d00 100%)",
             color: "white",
-            cursor: !isReady && (isRoomFull || !customName) ? "not-allowed" : "pointer",
+            cursor:
+              !isReady && (isRoomFull || !customName)
+                ? "not-allowed"
+                : "pointer",
             boxShadow: "0 8px 24px rgba(0,0,0,0.35)",
             opacity: !isReady && (isRoomFull || !customName) ? 0.5 : 1,
           }}
