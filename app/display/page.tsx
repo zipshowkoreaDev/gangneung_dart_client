@@ -228,6 +228,17 @@ export default function DisplayPage() {
       if (key && key !== "_display") {
         setPlayers((prev) => {
           if (prev.has(key)) return prev;
+
+          if (isSoloMode) {
+            addLog(`Solo mode: Player rejected (${key})`);
+            socket.emit("player-rejected", {
+              room,
+              name: key,
+              reason: "solo-mode",
+            });
+            return prev;
+          }
+
           if (prev.size >= 2) {
             addLog(`Player limit: Max 2 (${key} rejected)`);
             return prev;
@@ -240,7 +251,7 @@ export default function DisplayPage() {
             isConnected: true,
             totalThrows: 0,
           });
-          addLog(`Player auto-joined: ${key}`);
+          addLog(`Player auto-joined: ${key} from ${data.name || data.socketId}`);
 
           setPlayerOrder((prevOrder) => {
             if (!prevOrder.includes(key)) {
@@ -252,7 +263,7 @@ export default function DisplayPage() {
           if (prev.size === 0 && !currentTurn) {
             setCurrentTurn(key);
             socket.emit("turn-update", { room, currentTurn: key });
-            addLog(`Turn started: ${key}`);
+            addLog(`Turn started: ${key} (first player)`);
           }
 
           return next;

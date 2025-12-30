@@ -365,7 +365,10 @@ export default function MobilePage() {
   };
 
   const throwDart = () => {
-    if (!readyRef.current) return;
+    if (!readyRef.current) {
+      addLog("Throw failed: Not ready");
+      return;
+    }
     if (!socket.connected) {
       addLog("Throw failed: Socket disconnected");
       return;
@@ -375,7 +378,7 @@ export default function MobilePage() {
       return;
     }
     if (!isSoloMode && !isMyTurn) {
-      addLog("Throw failed: Not your turn");
+      addLog(`Throw failed: Not your turn (solo=${isSoloMode}, myTurn=${isMyTurn}, name=${customName})`);
       return;
     }
 
