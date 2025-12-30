@@ -7,7 +7,6 @@ import { QRCodeSVG } from "qrcode.react";
 
 import Scene from "@/three/Scene";
 import { socket } from "@/shared/socket";
-import { createRoom } from "@/shared/room";
 
 type AimPayload = {
   room?: string;
@@ -23,16 +22,6 @@ type AimOffPayload = {
   playerId?: string;
   name?: string;
   socketId?: string;
-};
-
-type ThrowPayload = {
-  room?: string;
-  playerId?: string;
-  name?: string;
-  socketId?: string;
-  skin?: string;
-  power?: number; // 0..1
-  aim?: { x: number; y: number }; // -1..1
 };
 
 type AimState = Map<string, { x: number; y: number; skin?: string }>;
@@ -88,20 +77,13 @@ export default function DisplayPage() {
   useEffect(() => {
     setIsMounted(true);
 
-    // localStorage에서 기존 room 가져오기 (새로고침 시에도 유지)
-    const savedRoom = localStorage.getItem("display-room");
-    if (savedRoom) {
-      setRoom(savedRoom);
-      addLog(`💾 저장된 Room 복원: ${savedRoom}`);
-    } else {
-      const newRoom = createRoom();
-      setRoom(newRoom);
-      localStorage.setItem("display-room", newRoom);
-      addLog(`🆕 새 Room 생성: ${newRoom}`);
-    }
-  }, []);
+    // room은 항상 "zipshow"로 고정
+    const fixedRoom = "zipshow";
+    setRoom(fixedRoom);
+    addLog(`🎯 Room 고정: ${fixedRoom}`);
+  }, [addLog]);
 
-  // 2) QR 링크 생성: 개발 시 현재 호스트, 프로덕션 도메인 접속 시 환경변수 사용
+  // 2) QR 링크 생성: 하나의 QR 코드만 생성
   const mobileUrl = useMemo(() => {
     if (!isMounted || !room) return "";
 
@@ -109,15 +91,14 @@ export default function DisplayPage() {
     const isProductionDomain =
       typeof window !== "undefined" &&
       process.env.NEXT_PUBLIC_BASE_URL &&
-      window.location.host ===
-        new URL(process.env.NEXT_PUBLIC_BASE_URL).host;
+      window.location.host === new URL(process.env.NEXT_PUBLIC_BASE_URL).host;
 
     // 프로덕션 도메인이면 환경변수 사용, 아니면 현재 접속 중인 호스트 사용
     const base = isProductionDomain
       ? process.env.NEXT_PUBLIC_BASE_URL || ""
       : `${window.location.protocol}//${window.location.host}`;
 
-    return `${base}/mobile?room=${encodeURIComponent(room)}`;
+    return `${base}/mobile`;
   }, [isMounted, room]);
 
   // 3) socket 연결 & 이벤트 수신
@@ -134,21 +115,19 @@ export default function DisplayPage() {
       timestamp: new Date().toLocaleTimeString(),
     });
 
-    // 이미 연결되어 있으면 재연결하지 않음
+    // 소켓 연결
     if (!socket.connected) {
       addLog(`소켓 연결 시도 중... (${url})`);
       socket.connect();
-    } else {
-      // 이미 연결된 경우 room만 다시 join
-      addLog(`이미 연결됨 - Room 재참가: ${room}`);
-      socket.emit("join-room", { room, role: "display" });
     }
 
     const onConnect = () => {
       setIsConnected(true);
       addLog(`✅ 소켓 연결 성공: ${socket.id}`);
-      socket.emit("join-room", { room, role: "display" });
-      addLog(`🚪 Room 참가: ${room}`);
+      // Display는 특별한 name으로 구분 (서버가 플레이어 카운트에서 제외하도록)
+      // 언더스코어로 시작하는 이름은 시스템 클라이언트로 간주
+      socket.emit("joinRoom", { room, name: "_display" });
+      addLog(`🚪 Room 참가 요청: ${room} (Display 모드)`);
     };
 
     socket.on("connect", onConnect);
@@ -165,6 +144,33 @@ export default function DisplayPage() {
 
     socket.on("connect_error", onConnectError);
     socket.on("disconnect", onDisconnect);
+
+    // 문서 스펙: clientInfo 수신
+    const onClientInfo = (data: {
+      socketId: string;
+      name: string;
+      room: string;
+    }) => {
+      addLog(`📋 클라이언트 정보: ${data.name} (${data.socketId})`);
+    };
+
+    // 문서 스펙: joinedRoom 수신
+    const onJoinedRoom = (data: { room: string; playerCount: number }) => {
+      // Display 자신을 제외한 실제 플레이어 수
+      const actualPlayerCount = Math.max(0, data.playerCount - 1);
+      addLog(`✅ 방 참가 완료: ${data.room}, 플레이어 수: ${actualPlayerCount}명`);
+    };
+
+    // 문서 스펙: roomPlayerCount 수신
+    const onRoomPlayerCount = (data: { room: string; playerCount: number }) => {
+      // Display 자신을 제외한 실제 플레이어 수 (Display는 플레이어가 아님)
+      const actualPlayerCount = Math.max(0, data.playerCount - 1);
+      addLog(`👥 플레이어 수 변경: ${actualPlayerCount}명 (서버: ${data.playerCount}명)`);
+    };
+
+    socket.on("clientInfo", onClientInfo);
+    socket.on("joinedRoom", onJoinedRoom);
+    socket.on("roomPlayerCount", onRoomPlayerCount);
 
     const onAimUpdate = (data: AimPayload) => {
       addLog(`🎯 aim-update 수신: ${resolvePlayerKey(data)}`);
@@ -201,8 +207,14 @@ export default function DisplayPage() {
       });
     };
 
-    const onThrow = (data: ThrowPayload) => {
-      addLog(`🎲 throw 수신: ${resolvePlayerKey(data)}`);
+    // 문서 스펙: dart-thrown 수신
+    const onDartThrown = (data: {
+      room: string;
+      name: string;
+      aim: { x: number; y: number };
+      score: number;
+    }) => {
+      addLog(`🎲 dart-thrown 수신: ${data.name}, 점수: ${data.score}`);
       if (data.room && data.room !== room) return;
 
       // R3F로 throw 이벤트 전달 (Explosion 트리거 등)
@@ -211,7 +223,7 @@ export default function DisplayPage() {
 
     socket.on("aim-update", onAimUpdate);
     socket.on("aim-off", onAimOff);
-    socket.on("throw", onThrow);
+    socket.on("dart-thrown", onDartThrown);
 
     return () => {
       console.log("🧹 Socket useEffect cleanup", {
@@ -222,9 +234,12 @@ export default function DisplayPage() {
       socket.off("connect", onConnect);
       socket.off("connect_error", onConnectError);
       socket.off("disconnect", onDisconnect);
+      socket.off("clientInfo", onClientInfo);
+      socket.off("joinedRoom", onJoinedRoom);
+      socket.off("roomPlayerCount", onRoomPlayerCount);
       socket.off("aim-update", onAimUpdate);
       socket.off("aim-off", onAimOff);
-      socket.off("throw", onThrow);
+      socket.off("dart-thrown", onDartThrown);
 
       // 개발 모드에서는 절대 disconnect 하지 않음
       // 프로덕션에서도 페이지를 완전히 떠날 때만 disconnect됨
@@ -298,7 +313,7 @@ export default function DisplayPage() {
           zIndex: 10,
           background: "rgba(0, 0, 0, 0.9)",
           color: "white",
-          padding: "10px 20px",
+          padding: "15px 20px",
           borderRadius: 8,
           fontFamily: "monospace",
           boxShadow: "0 8px 32px rgba(0,0,0,0.6)",
@@ -311,25 +326,24 @@ export default function DisplayPage() {
               display: "flex",
               flexDirection: "column",
               alignItems: "center",
-              gap: 6,
+              gap: 8,
             }}
           >
             <div
               style={{
                 background: "white",
-                padding: 7.5,
+                padding: 10,
                 borderRadius: 4,
                 boxShadow: "0 4px 20px rgba(255,255,255,0.2)",
               }}
             >
               <QRCodeSVG
                 value={mobileUrl}
-                size={80}
+                size={100}
                 level="H"
                 includeMargin={false}
               />
             </div>
-
             <div
               style={{
                 fontSize: 14,
@@ -340,9 +354,15 @@ export default function DisplayPage() {
             >
               QR 코드 스캔
             </div>
-
-            {/* 개발용 표시 (원하면 지워) */}
-            <div style={{ fontSize: 12, opacity: 0.8 }}>ROOM: {room}</div>
+            <div
+              style={{
+                fontSize: 11,
+                opacity: 0.7,
+                textAlign: "center",
+              }}
+            >
+              Room: zipshow
+            </div>
           </div>
         )}
       </div>

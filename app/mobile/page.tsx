@@ -21,7 +21,7 @@ interface DeviceOrientationEventiOS {
 export default function MobilePage() {
   const [room, setRoom] = useState("");
   const [playerId, setPlayerId] = useState("");
-  const [skin] = useState<Skin>("red");
+
   const [status, setStatus] = useState("대기중");
   const [isReady, setIsReady] = useState(false);
   const [aim, setAim] = useState({ x: 0, y: 0 }); // -1..1
@@ -43,6 +43,8 @@ export default function MobilePage() {
   const prevMagRef = useRef(0);
   const accPeakRef = useRef(0);
   const gravityZRef = useRef(0);
+
+  const skin: Skin = "red"; // 임시 고정
 
   // 던지는 순간의 정확한 aim 좌표를 저장
   const aimRef = useRef({ x: 0, y: 0 });
@@ -67,15 +69,14 @@ export default function MobilePage() {
 
   /* -------------------- init -------------------- */
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const r = params.get("room") || "DEMO";
-    setRoom(r.toUpperCase());
-    setPlayerId(`Player${Math.floor(Math.random() * 1000)}`);
-    addLog(
-      `Room: ${r.toUpperCase()}, Player: Player${Math.floor(
-        Math.random() * 1000
-      )}`
-    );
+    // room은 항상 "zipshow"로 고정
+    const r = "zipshow";
+    setRoom(r);
+
+    // 초기 playerId는 임시 (서버에서 자동 할당받음)
+    setPlayerId("대기중...");
+
+    addLog(`Room: ${r}, 플레이어 이름 대기 중...`);
   }, [addLog]);
 
   /* -------------------- socket -------------------- */
@@ -92,12 +93,12 @@ export default function MobilePage() {
     socket.on("connect", () => {
       setIsConnected(true);
       addLog(`✅ 소켓 연결 성공: ${socket.id}`);
-      socket.emit("join-room", {
+
+      // 문서 스펙: name 없이 joinRoom (서버가 자동 할당)
+      socket.emit("joinRoom", {
         room,
-        role: "mobile",
-        playerId,
       });
-      addLog(`🚪 Room 참가: ${room}`);
+      addLog(`🚪 Room 참가 요청: ${room} (이름 자동 할당)`);
     });
 
     socket.on("connect_error", (err) => {
@@ -111,11 +112,37 @@ export default function MobilePage() {
       addLog(`⚠️ 연결 끊김: ${reason}`);
     });
 
+    // 문서 스펙: clientInfo 수신 (서버가 할당한 이름 받기)
+    socket.on(
+      "clientInfo",
+      (data: { socketId: string; name: string; room: string }) => {
+        setPlayerId(data.name);
+        addLog(`📋 클라이언트 정보: ${data.name} (${data.socketId})`);
+        setStatus(`${data.name}로 할당됨`);
+      }
+    );
+
+    // 문서 스펙: joinedRoom 수신
+    socket.on("joinedRoom", (data: { room: string; playerCount: number }) => {
+      addLog(`✅ 방 참가 완료: ${data.room}, 플레이어 수: ${data.playerCount}`);
+    });
+
+    // 문서 스펙: roomPlayerCount 수신
+    socket.on(
+      "roomPlayerCount",
+      (data: { room: string; playerCount: number }) => {
+        addLog(`👥 플레이어 수 변경: ${data.playerCount}명`);
+      }
+    );
+
     return () => {
       stopSensors();
       socket.off("connect");
       socket.off("connect_error");
       socket.off("disconnect");
+      socket.off("clientInfo");
+      socket.off("joinedRoom");
+      socket.off("roomPlayerCount");
 
       // 개발 모드에서는 HMR로 인한 재연결 방지
       if (process.env.NODE_ENV === "production") {
@@ -208,7 +235,7 @@ export default function MobilePage() {
     if (socket.connected) {
       socket.emit("aim-off", {
         room,
-        playerId,
+        name: playerId,
       });
     }
 
@@ -244,13 +271,11 @@ export default function MobilePage() {
         Math.abs(gravityZRef.current) > 4 && gravityZRef.current < 0;
       const y = faceUp ? y0 : -y0;
 
-      // state와 ref 모두 업데이트 (state는 UI용, ref는 throw 시 사용)
       const aimValue = { x, y };
       setAim(aimValue);
       aimRef.current = aimValue;
       aimReadyRef.current = true;
 
-      // 처음 이벤트 발생 로그
       orientationCount++;
       if (orientationCount === 1) {
         addLog(
@@ -268,11 +293,10 @@ export default function MobilePage() {
         lastAimSentRef.current = now;
         socket.emit("aim-update", {
           room,
-          playerId,
+          name: playerId,
           skin,
           aim: { x, y },
         });
-        // 처음 한 번만 로그 (너무 많이 찍히지 않도록)
         if (now - armedAtRef.current < 2000) {
           addLog(`📡 aim-update 전송 (room=${room}, player=${playerId})`);
         }
@@ -319,7 +343,6 @@ export default function MobilePage() {
     window.addEventListener("devicemotion", handleMotionRef.current);
     addLog("✅ 이벤트 리스너 등록 완료");
 
-    // 2초 후에도 이벤트가 없으면 경고
     setTimeout(() => {
       if (orientationCount === 0) {
         addLog("⚠️ 자이로 이벤트가 발생하지 않음! 권한을 확인하세요.");
@@ -346,12 +369,12 @@ export default function MobilePage() {
         2
       )}, ${currentAim.y.toFixed(2)})`
     );
-    socket.emit("throw", {
+    // 문서 스펙: throw-dart 이벤트 (score는 임시로 0 또는 계산된 값)
+    socket.emit("throw-dart", {
       room,
-      playerId,
-      skin,
+      name: playerId,
       aim: currentAim,
-      power,
+      score: Math.round(power * 100),
     });
 
     setStatus(
@@ -360,7 +383,7 @@ export default function MobilePage() {
       )}, ${currentAim.y.toFixed(2)})`
     );
 
-    socket.emit("aim-off", { room, playerId });
+    socket.emit("aim-off", { room, name: playerId });
     aimBlockedUntilRef.current = performance.now() + 1200;
 
     accPeakRef.current = 0;
@@ -462,14 +485,12 @@ export default function MobilePage() {
           dpr={[1, 1.5]}
           gl={{ antialias: true }}
         >
-          {/* 다트가 세로로 서있다는 전제: 필요시 rotation/scale 조절 */}
           <group position={[0, -0.2, 0]} scale={1.1}>
             <DartPreview />
           </group>
         </Canvas>
       </div>
 
-      {/* ✅ 기존 UI(조준점/가이드)는 위로 */}
       <div
         style={{
           position: "relative",
@@ -478,7 +499,6 @@ export default function MobilePage() {
           height: "100%",
         }}
       >
-        {/* 여기부터는 너의 기존 isReady 분기 UI 그대로 두면 됨 */}
         {isReady && (
           <div
             style={{
