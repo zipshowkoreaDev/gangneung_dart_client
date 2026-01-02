@@ -267,7 +267,9 @@ export default function DisplayPage() {
             isConnected: true,
             totalThrows: 0,
           });
-          addLog(`Player auto-joined: ${key} from ${data.name || data.socketId}`);
+          addLog(
+            `Player auto-joined: ${key} from ${data.name || data.socketId}`
+          );
 
           setPlayerOrder((prevOrder) => {
             if (!prevOrder.includes(key)) {
@@ -283,7 +285,9 @@ export default function DisplayPage() {
             socket.emit("turn-update", { room, currentTurn: key });
             addLog(`Turn started: ${key} (first player)`);
           } else {
-            addLog(`Player joined but turn not started (prevSize=${prev.size}, currentTurn=${currentTurn})`);
+            addLog(
+              `Player joined but turn not started (prevSize=${prev.size}, currentTurn=${currentTurn})`
+            );
           }
 
           return next;
@@ -404,7 +408,11 @@ export default function DisplayPage() {
 
               if (nextPlayerData?.isConnected) {
                 setCurrentTurn(nextPlayer);
-                addLog(`Turn rotation: ${data.name} -> ${nextPlayer} (order: [${playerOrder.join(", ")}])`);
+                addLog(
+                  `Turn rotation: ${
+                    data.name
+                  } -> ${nextPlayer} (order: [${playerOrder.join(", ")}])`
+                );
                 socket.emit("turn-update", {
                   room: data.room,
                   currentTurn: nextPlayer,
@@ -461,6 +469,10 @@ export default function DisplayPage() {
         height: "100vh",
         position: "relative",
         overflow: "hidden",
+        backgroundImage: "url(/04_roulette_BG.webp)",
+        backgroundSize: "cover",
+        backgroundPosition: "center",
+        backgroundRepeat: "no-repeat",
       }}
     >
       {/* 스코어보드 - 상단 가로 배치 */}
@@ -719,79 +731,91 @@ export default function DisplayPage() {
             return true;
           })
           .map(([playerKey, pos]) => {
-          // -1..1 → 0..1
-          const x01 = (pos.x + 1) / 2;
-          const y01 = (pos.y + 1) / 2;
+            // -1..1 → 0..1
+            const x01 = (pos.x + 1) / 2;
+            const y01 = (pos.y + 1) / 2;
 
-          const color = resolveColor(pos.skin);
+            const color = resolveColor(pos.skin);
 
-          return (
-            <div key={playerKey}>
-              <div
-                style={{
-                  position: "absolute",
-                  left: `${x01 * 100}%`,
-                  top: `${y01 * 100}%`,
-                  transform: "translate(-50%, -50%)",
-                  width: 40,
-                  height: 40,
-                  borderRadius: "50%",
-                  border: `4px solid ${color}`,
-                  background: `${color}33`,
-                  zIndex: 5,
-                  pointerEvents: "none",
-                  transition: "all 0.05s ease-out",
-                }}
-              />
-              <div
-                style={{
-                  position: "absolute",
-                  left: `${x01 * 100}%`,
-                  top: `${y01 * 100}%`,
-                  transform: "translate(-50%, -50%)",
-                  width: 6,
-                  height: 6,
-                  borderRadius: "50%",
-                  background: color,
-                  zIndex: 6,
-                  pointerEvents: "none",
-                }}
-              />
-              <div
-                style={{
-                  position: "absolute",
-                  left: `${x01 * 100}%`,
-                  top: `${y01 * 100}%`,
-                  transform: "translate(-50%, calc(-50% - 35px))",
-                  background: "rgba(0, 0, 0, 0.7)",
-                  color: "white",
-                  padding: "4px 8px",
-                  borderRadius: 4,
-                  fontSize: 12,
-                  fontWeight: 700,
-                  zIndex: 7,
-                  pointerEvents: "none",
-                  whiteSpace: "nowrap",
-                }}
-              >
-                {playerKey}
+            return (
+              <div key={playerKey}>
+                <div
+                  style={{
+                    position: "absolute",
+                    left: `${x01 * 100}%`,
+                    top: `${y01 * 100}%`,
+                    transform: "translate(-50%, -50%)",
+                    width: 40,
+                    height: 40,
+                    borderRadius: "50%",
+                    border: `4px solid ${color}`,
+                    background: `${color}33`,
+                    zIndex: 5,
+                    pointerEvents: "none",
+                    transition: "all 0.05s ease-out",
+                  }}
+                />
+                <div
+                  style={{
+                    position: "absolute",
+                    left: `${x01 * 100}%`,
+                    top: `${y01 * 100}%`,
+                    transform: "translate(-50%, -50%)",
+                    width: 6,
+                    height: 6,
+                    borderRadius: "50%",
+                    background: color,
+                    zIndex: 6,
+                    pointerEvents: "none",
+                  }}
+                />
+                <div
+                  style={{
+                    position: "absolute",
+                    left: `${x01 * 100}%`,
+                    top: `${y01 * 100}%`,
+                    transform: "translate(-50%, calc(-50% - 35px))",
+                    background: "rgba(0, 0, 0, 0.7)",
+                    color: "white",
+                    padding: "4px 8px",
+                    borderRadius: 4,
+                    fontSize: 12,
+                    fontWeight: 700,
+                    zIndex: 7,
+                    pointerEvents: "none",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {playerKey}
+                </div>
               </div>
-            </div>
-          );
-        })}
+            );
+          })}
 
       {/* R3F */}
-      <Canvas
-        camera={{
-          position: [0, 0, 50],
-          fov: 50,
+      <div
+        style={{
+          position: "absolute",
+          top: 0,
+          left: 0,
+          width: "100%",
+          height: "100%",
+          transform: "translateY(-12.5%)",
+          pointerEvents: "none",
         }}
-        dpr={[1, 2]}
-        gl={{ antialias: true }}
       >
-        {/* <Machine /> */}
-        <Scene />
-      </Canvas>
+        <Canvas
+          camera={{
+            position: [0, 0, 50],
+            fov: 50,
+          }}
+          dpr={[1, 2]}
+          gl={{ antialias: true }}
+        >
+          {/* <Machine /> */}
+          <Scene />
+        </Canvas>
+      </div>
     </div>
   );
 }

@@ -114,7 +114,7 @@ function RotatingRoulette({
 
   return (
     <group ref={groupRef}>
-      <primitive object={scene} rotation={[0, -Math.PI / 2, 0]} scale={1.25} />
+      <primitive object={scene} rotation={[0, -Math.PI / 2, 0]} scale={1} />
 
       {/* 날아가는 다트들 */}
       {flyingDarts.map((dart) => (
