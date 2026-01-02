@@ -63,6 +63,7 @@ export default function DisplayPage() {
   const [playerOrder, setPlayerOrder] = useState<string[]>([]);
   const [isSoloMode, setIsSoloMode] = useState(false);
   const isSoloModeRef = useRef(false);
+  const soloPlayerRef = useRef<string | null>(null);
 
   useEffect(() => {
     console.log("DisplayPage mounted", { room });
@@ -83,8 +84,21 @@ export default function DisplayPage() {
     setIsSoloMode(true);
     isSoloModeRef.current = true;
     const soloPlayer = Array.from(players.keys())[0];
+    soloPlayerRef.current = soloPlayer;
     setCurrentTurn(soloPlayer);
     addLog(`Solo mode started: ${soloPlayer}`);
+
+    // 솔로 플레이어가 아닌 조준점 제거
+    setAimPositions((prev) => {
+      const next = new Map(prev);
+      Array.from(next.keys()).forEach((key) => {
+        if (key !== soloPlayer) {
+          next.delete(key);
+          addLog(`Removed aim for ${key} (solo mode)`);
+        }
+      });
+      return next;
+    });
 
     socket.emit("solo-mode-started", {
       room,
@@ -279,6 +293,13 @@ export default function DisplayPage() {
       setAimPositions((prev) => {
         const next = new Map(prev);
         if (!prev.has(key) && prev.size >= 2) return prev;
+
+        // 혼자하기 모드일 때 솔로 플레이어가 아니면 조준점 표시하지 않음
+        if (isSoloModeRef.current && key !== soloPlayerRef.current) {
+          addLog(`Solo mode: Aim blocked for ${key}`);
+          return prev;
+        }
+
         next.set(key, { x, y, skin: data.skin });
         return next;
       });
@@ -666,7 +687,15 @@ export default function DisplayPage() {
 
       {/* 조준점 Overlay (DOM) */}
       {isMounted &&
-        Array.from(aimPositions.entries()).map(([playerKey, pos]) => {
+        Array.from(aimPositions.entries())
+          .filter(([playerKey]) => {
+            // 혼자하기 모드일 때는 솔로 플레이어의 조준점만 표시
+            if (isSoloMode && soloPlayerRef.current) {
+              return playerKey === soloPlayerRef.current;
+            }
+            return true;
+          })
+          .map(([playerKey, pos]) => {
           // -1..1 → 0..1
           const x01 = (pos.x + 1) / 2;
           const y01 = (pos.y + 1) / 2;
