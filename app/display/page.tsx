@@ -317,6 +317,29 @@ export default function DisplayPage() {
 
       const playerName = data.name || resolvePlayerKey(data);
       if (playerName !== "_display") {
+        // 혼자하기 모드 중인 플레이어가 나가면 방 완전 초기화
+        if (isSoloModeRef.current && playerName === soloPlayerRef.current) {
+          addLog(`Solo player left: ${playerName} - Resetting room`);
+
+          // 혼자하기 모드 해제
+          setIsSoloMode(false);
+          isSoloModeRef.current = false;
+          soloPlayerRef.current = null;
+
+          // 모든 상태 초기화
+          setPlayers(new Map());
+          setPlayerOrder([]);
+          setCurrentTurn(null);
+          setAimPositions(new Map());
+
+          socket.emit("turn-update", {
+            room: data.room,
+            currentTurn: null,
+          });
+
+          return;
+        }
+
         setPlayers((prev) => {
           const next = new Map(prev);
           const player = prev.get(playerName);
