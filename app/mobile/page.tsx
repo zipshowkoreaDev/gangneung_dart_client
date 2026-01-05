@@ -1,7 +1,16 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { useMobileSocket } from "@/hooks/useMobileSocket";
+
+type ConnectionState =
+  | "idle"
+  | "connecting"
+  | "connected"
+  | "joined"
+  | "waiting-display"
+  | "ready"
+  | "rejected";
 
 export default function MobilePage() {
   const [room] = useState(() => {
@@ -18,11 +27,19 @@ export default function MobilePage() {
   const [isRejected, setIsRejected] = useState(false);
   const [selectedMode, setSelectedMode] = useState<"solo" | "duo" | null>(null);
   const [shouldConnect, setShouldConnect] = useState(false);
+  const [connectionState, setConnectionState] = useState<ConnectionState>(
+    "idle"
+  );
+  const [nameError, setNameError] = useState("");
 
   const addLog = useCallback((msg: string) => {
     const timestamp = new Date().toLocaleTimeString();
     console.log(`[${timestamp}] ${msg}`);
   }, []);
+
+  const emitRef = useRef<(aim: { x: number; y: number }, skin?: string) => void>(
+    () => {}
+  );
 
   const { emitAimUpdate } = useMobileSocket({
     room: shouldConnect ? room : "",
@@ -31,33 +48,80 @@ export default function MobilePage() {
     onSetPlayerCount: setPlayerCount,
     onSetIsRoomFull: setIsRoomFull,
     onSetIsRejected: setIsRejected,
+    onConnected: () => setConnectionState("connected"),
+    onJoined: (data) => {
+      addLog(
+        `Joined room with ${Math.max(0, data.playerCount - 1)} other players`
+      );
+      setConnectionState("joined");
+
+      if (selectedMode === "solo") {
+        setConnectionState("ready");
+        emitRef.current({ x: 888, y: 888 });
+        addLog(`Solo mode selected: ${customName}`);
+      } else if (selectedMode === "duo") {
+        setConnectionState("waiting-display");
+        emitRef.current({ x: 999, y: 999 });
+        addLog(`Duo mode selected: ${customName} (waiting for display)`);
+      }
+    },
+    onTurnUpdate: (currentTurn) => {
+      if (selectedMode === "duo" && currentTurn) {
+        setConnectionState("ready");
+      }
+    },
   });
+
+  useEffect(() => {
+    emitRef.current = emitAimUpdate;
+  }, [emitAimUpdate]);
 
   useEffect(() => {
     if (shouldConnect) {
       addLog(`Room: ${room}`);
+      setConnectionState((prev) => (prev === "idle" ? "connecting" : prev));
     }
   }, [room, shouldConnect, addLog]);
+
+  useEffect(() => {
+    if (isRoomFull || isRejected) {
+      setConnectionState("rejected");
+    }
+  }, [isRoomFull, isRejected]);
 
   const handleModeSelect = (mode: "solo" | "duo") => {
     if (!customName) {
       addLog("이름을 먼저 입력해주세요");
+      setNameError("이름을 입력하면 시작할 수 있어요");
       return;
     }
 
+    setNameError("");
     setShouldConnect(true);
     setSelectedMode(mode);
-
-    setTimeout(() => {
-      if (mode === "solo") {
-        emitAimUpdate({ x: 888, y: 888 });
-        addLog(`Solo mode selected: ${customName}`);
-      } else {
-        emitAimUpdate({ x: 999, y: 999 });
-        addLog(`Duo mode selected: ${customName}`);
-      }
-    }, 500);
+    setConnectionState("connecting");
   };
+
+  const visiblePlayerCount = Math.max(0, playerCount - 1);
+  const statusMessage = (() => {
+    if (isRoomFull) {
+      return isRejected
+        ? "현재 혼자하기 모드로 진행 중입니다."
+        : "최대 인원이 가득 찼습니다.";
+    }
+    if (selectedMode === "duo" && connectionState === "waiting-display") {
+      return "디스플레이에서 준비를 확인 중입니다. 잠시만 기다려주세요.";
+    }
+    if (connectionState === "connecting") return "소켓에 연결 중...";
+    if (connectionState === "connected") return "방 참여를 시도하는 중...";
+    if (connectionState === "joined" && selectedMode === "duo")
+      return "둘이서 하기 준비 신호를 보냈습니다.";
+    if (connectionState === "ready" && selectedMode === "solo")
+      return "혼자하기 준비 완료! 바로 시작하세요.";
+    if (connectionState === "ready" && selectedMode === "duo")
+      return "둘이서 하기 준비 완료!";
+    return "";
+  })();
 
   return (
     <div
@@ -125,8 +189,20 @@ export default function MobilePage() {
             플레이어: {customName}
           </div>
           <div style={{ fontSize: "14px", opacity: 0.6, marginTop: "8px" }}>
-            현재 인원: {playerCount}명
+            현재 인원: {visiblePlayerCount}명
           </div>
+          {statusMessage && (
+            <div
+              style={{
+                fontSize: "13px",
+                opacity: 0.7,
+                marginTop: "12px",
+                lineHeight: 1.5,
+              }}
+            >
+              {statusMessage}
+            </div>
+          )}
         </div>
       ) : (
         <>
@@ -184,7 +260,19 @@ export default function MobilePage() {
                   textAlign: "center",
                 }}
               >
-                현재 방 인원: {playerCount}명
+                현재 방 인원: {visiblePlayerCount}명
+              </div>
+            )}
+            {nameError && (
+              <div
+                style={{
+                  fontSize: "12px",
+                  color: "#ffdddd",
+                  textAlign: "center",
+                  opacity: 0.8,
+                }}
+              >
+                {nameError}
               </div>
             )}
           </div>
@@ -247,6 +335,27 @@ export default function MobilePage() {
             </button>
           </div>
         </>
+      )}
+      {statusMessage && selectedMode === null && (
+        <div
+          style={{
+            position: "absolute",
+            bottom: "24px",
+            left: "50%",
+            transform: "translateX(-50%)",
+            color: "white",
+            fontSize: "14px",
+            opacity: 0.9,
+            textAlign: "center",
+            padding: "10px 16px",
+            background: "rgba(0,0,0,0.4)",
+            borderRadius: "12px",
+            maxWidth: "320px",
+            lineHeight: 1.5,
+          }}
+        >
+          {statusMessage}
+        </div>
       )}
     </div>
   );

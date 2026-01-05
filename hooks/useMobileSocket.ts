@@ -8,6 +8,9 @@ interface UseMobileSocketProps {
   onSetPlayerCount: (count: number) => void;
   onSetIsRoomFull: (isFull: boolean) => void;
   onSetIsRejected: (isRejected: boolean) => void;
+  onConnected?: () => void;
+  onJoined?: (data: { room: string; playerCount: number }) => void;
+  onTurnUpdate?: (currentTurn: string | null) => void;
 }
 
 export function useMobileSocket({
@@ -17,6 +20,9 @@ export function useMobileSocket({
   onSetPlayerCount,
   onSetIsRoomFull,
   onSetIsRejected,
+  onConnected,
+  onJoined,
+  onTurnUpdate,
 }: UseMobileSocketProps) {
   useEffect(() => {
     if (!room) return;
@@ -25,6 +31,7 @@ export function useMobileSocket({
 
     const handleConnect = () => {
       onLog(`Socket connected: ${socket.id}`);
+      onConnected?.();
       socket.emit("joinRoom", {
         room,
         name: customName,
@@ -57,6 +64,8 @@ export function useMobileSocket({
         onLog(`Room full: ${data.playerCount} players (max 3)`);
         socket.disconnect();
       }
+
+      onJoined?.(data);
     };
 
     const handleRoomPlayerCount = (data: {
@@ -88,6 +97,14 @@ export function useMobileSocket({
       }
     };
 
+    const handleTurnUpdate = (data: {
+      room: string;
+      currentTurn: string | null;
+    }) => {
+      if (data.room && data.room !== room) return;
+      onTurnUpdate?.(data.currentTurn);
+    };
+
     socket.on("connect", handleConnect);
     socket.on("connect_error", handleConnectError);
     socket.on("disconnect", handleDisconnect);
@@ -95,6 +112,7 @@ export function useMobileSocket({
     socket.on("joinedRoom", handleJoinedRoom);
     socket.on("roomPlayerCount", handleRoomPlayerCount);
     socket.on("player-rejected", handlePlayerRejected);
+    socket.on("turn-update", handleTurnUpdate);
 
     return () => {
       socket.off("connect", handleConnect);
@@ -104,12 +122,23 @@ export function useMobileSocket({
       socket.off("joinedRoom", handleJoinedRoom);
       socket.off("roomPlayerCount", handleRoomPlayerCount);
       socket.off("player-rejected", handlePlayerRejected);
+      socket.off("turn-update", handleTurnUpdate);
 
       if (process.env.NODE_ENV === "production") {
         socket.disconnect();
       }
     };
-  }, [room, customName, onLog, onSetPlayerCount, onSetIsRoomFull, onSetIsRejected]);
+  }, [
+    room,
+    customName,
+    onLog,
+    onSetPlayerCount,
+    onSetIsRoomFull,
+    onSetIsRejected,
+    onConnected,
+    onJoined,
+    onTurnUpdate,
+  ]);
 
   const emitAimUpdate = useCallback(
     (aim: { x: number; y: number }, skin?: string) => {
