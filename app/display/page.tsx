@@ -1,27 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useState, useCallback, useRef } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
 import { Canvas } from "@react-three/fiber";
 import { QRCodeSVG } from "qrcode.react";
 
 import Scene from "@/three/Scene";
 import { socket } from "@/shared/socket";
-
-type AimPayload = {
-  room?: string;
-  playerId?: string;
-  name?: string;
-  socketId?: string;
-  skin?: string;
-  aim: { x: number; y: number }; // -1..1
-};
-
-type AimOffPayload = {
-  room?: string;
-  playerId?: string;
-  name?: string;
-  socketId?: string;
-};
+import { useDisplaySocket } from "@/hooks/useDisplaySocket";
 
 type AimState = Map<string, { x: number; y: number; skin?: string }>;
 
@@ -29,20 +14,10 @@ type PlayerScore = {
   name: string;
   score: number;
   isConnected: boolean;
+  isReady: boolean;
   totalThrows: number;
+  currentThrows: number;
 };
-
-function clamp(n: number, min: number, max: number) {
-  return Math.max(min, Math.min(max, n));
-}
-
-function resolvePlayerKey(data: {
-  playerId?: string;
-  name?: string;
-  socketId?: string;
-}) {
-  return data.playerId || data.name || data.socketId || "player";
-}
 
 function resolveColor(skin?: string) {
   if (skin === "red") return "#ff4d4d";
@@ -62,8 +37,7 @@ export default function DisplayPage() {
   const [currentTurn, setCurrentTurn] = useState<string | null>(null);
   const [playerOrder, setPlayerOrder] = useState<string[]>([]);
   const [isSoloMode, setIsSoloMode] = useState(false);
-  const isSoloModeRef = useRef(false);
-  const soloPlayerRef = useRef<string | null>(null);
+  const [countdown, setCountdown] = useState<number | null>(null);
 
   useEffect(() => {
     console.log("DisplayPage mounted", { room });
@@ -78,33 +52,44 @@ export default function DisplayPage() {
     console.log(`[${timestamp}] ${msg}`);
   }, []);
 
-  const startSoloMode = useCallback(() => {
-    if (players.size !== 1) return;
+  // 소켓 통신 훅 사용
+  const { soloPlayerRef } = useDisplaySocket({
+    room,
+    onLog: addLog,
+    setAimPositions,
+    setPlayers,
+    setCurrentTurn,
+    setPlayerOrder,
+    setIsSoloMode,
+    setCountdown,
+    players,
+    playerOrder,
+    countdown,
+  });
 
-    setIsSoloMode(true);
-    isSoloModeRef.current = true;
-    const soloPlayer = Array.from(players.keys())[0];
-    soloPlayerRef.current = soloPlayer;
-    setCurrentTurn(soloPlayer);
-    addLog(`Solo mode started: ${soloPlayer}`);
+  // 카운트다운 처리
+  useEffect(() => {
+    if (countdown === null) return;
 
-    // 솔로 플레이어가 아닌 조준점 제거
-    setAimPositions((prev) => {
-      const next = new Map(prev);
-      Array.from(next.keys()).forEach((key) => {
-        if (key !== soloPlayer) {
-          next.delete(key);
-          addLog(`Removed aim for ${key} (solo mode)`);
-        }
-      });
-      return next;
-    });
-
-    socket.emit("solo-mode-started", {
-      room,
-      player: soloPlayer,
-    });
-  }, [players, room, addLog]);
+    if (countdown > 0) {
+      const timer = setTimeout(() => {
+        setCountdown(countdown - 1);
+      }, 1000);
+      return () => clearTimeout(timer);
+    } else {
+      // 카운트다운 종료, 첫 번째 플레이어 턴 시작
+      const firstPlayer = playerOrder[0];
+      if (firstPlayer) {
+        setCurrentTurn(firstPlayer);
+        socket.emit("turn-update", {
+          room,
+          currentTurn: firstPlayer,
+        });
+        addLog(`Game started! Turn: ${firstPlayer}`);
+      }
+      setCountdown(null);
+    }
+  }, [countdown, playerOrder, room, addLog]);
 
   useEffect(() => {
     setTimeout(() => {
@@ -132,335 +117,6 @@ export default function DisplayPage() {
 
     return `${base}/mobile?room=${encodeURIComponent(room)}`;
   }, [isMounted, room]);
-
-  useEffect(() => {
-    if (!room) return;
-
-    if (!socket.connected) {
-      socket.connect();
-    }
-
-    const onConnect = () => {
-      addLog(`Socket connected: ${socket.id}`);
-      socket.emit("joinRoom", { room, name: "_display" });
-    };
-
-    socket.on("connect", onConnect);
-
-    const onConnectError = (err: Error) => {
-      addLog(`Connection error: ${err.message}`);
-    };
-
-    const onDisconnect = (reason: string) => {
-      addLog(`Disconnected: ${reason}`);
-    };
-
-    socket.on("connect_error", onConnectError);
-    socket.on("disconnect", onDisconnect);
-
-    const onClientInfo = (data: {
-      socketId: string;
-      name: string;
-      room: string;
-    }) => {
-      if (data.name === "_display") return;
-
-      if (isSoloModeRef.current) {
-        addLog(`Solo mode: Player rejected (${data.name})`);
-        socket.emit("player-rejected", {
-          room: data.room,
-          name: data.name,
-          reason: "solo-mode",
-        });
-        return;
-      }
-
-      setPlayers((prev) => {
-        const next = new Map(prev);
-
-        if (!prev.has(data.name) && prev.size >= 2) {
-          addLog(`Player limit: Max 2 (${data.name} rejected)`);
-          return prev;
-        }
-
-        if (!prev.has(data.name)) {
-          next.set(data.name, {
-            name: data.name,
-            score: 0,
-            isConnected: true,
-            totalThrows: 0,
-          });
-          addLog(`Player joined: ${data.name}`);
-        } else {
-          const player = prev.get(data.name)!;
-          next.set(data.name, { ...player, isConnected: true });
-          addLog(`Player reconnected: ${data.name}`);
-        }
-
-        return next;
-      });
-
-      setPlayerOrder((prev) => {
-        if (!prev.includes(data.name)) {
-          return [...prev, data.name];
-        }
-        return prev;
-      });
-
-      setCurrentTurn((prevTurn) => {
-        if (!prevTurn && data.name !== "_display") {
-          addLog(`Turn started: ${data.name}`);
-          socket.emit("turn-update", {
-            room: data.room,
-            currentTurn: data.name,
-          });
-          return data.name;
-        }
-        return prevTurn;
-      });
-    };
-
-    const onJoinedRoom = (data: { room: string; playerCount: number }) => {
-      const actualPlayerCount = Math.max(0, data.playerCount - 1);
-      addLog(`Room joined: ${data.room}, Players: ${actualPlayerCount}`);
-    };
-
-    const onRoomPlayerCount = (data: { room: string; playerCount: number }) => {
-      const actualPlayerCount = Math.max(0, data.playerCount - 1);
-      addLog(`Player count: ${actualPlayerCount}`);
-    };
-
-    socket.on("clientInfo", onClientInfo);
-    socket.on("joinedRoom", onJoinedRoom);
-    socket.on("roomPlayerCount", onRoomPlayerCount);
-
-    const onAimUpdate = (data: AimPayload) => {
-      if (data.room && data.room !== room) return;
-
-      const key = resolvePlayerKey(data);
-      const x = clamp(data.aim?.x ?? 0, -1, 1);
-      const y = clamp(data.aim?.y ?? 0, -1, 1);
-
-      if (key && key !== "_display") {
-        setPlayers((prev) => {
-          if (prev.has(key)) return prev;
-
-          if (isSoloModeRef.current) {
-            addLog(`Solo mode: Player rejected (${key})`);
-            socket.emit("player-rejected", {
-              room,
-              name: key,
-              reason: "solo-mode",
-            });
-            return prev;
-          }
-
-          if (prev.size >= 2) {
-            addLog(`Player limit: Max 2 (${key} rejected)`);
-            return prev;
-          }
-
-          const next = new Map(prev);
-          next.set(key, {
-            name: key,
-            score: 0,
-            isConnected: true,
-            totalThrows: 0,
-          });
-          addLog(
-            `Player auto-joined: ${key} from ${data.name || data.socketId}`
-          );
-
-          setPlayerOrder((prevOrder) => {
-            if (!prevOrder.includes(key)) {
-              const newOrder = [...prevOrder, key];
-              addLog(`Player order updated: [${newOrder.join(", ")}]`);
-              return newOrder;
-            }
-            return prevOrder;
-          });
-
-          if (prev.size === 0 && !currentTurn) {
-            setCurrentTurn(key);
-            socket.emit("turn-update", { room, currentTurn: key });
-            addLog(`Turn started: ${key} (first player)`);
-          } else {
-            addLog(
-              `Player joined but turn not started (prevSize=${prev.size}, currentTurn=${currentTurn})`
-            );
-          }
-
-          return next;
-        });
-      }
-
-      setAimPositions((prev) => {
-        const next = new Map(prev);
-        if (!prev.has(key) && prev.size >= 2) return prev;
-
-        // 혼자하기 모드일 때 솔로 플레이어가 아니면 조준점 표시하지 않음
-        if (isSoloModeRef.current && key !== soloPlayerRef.current) {
-          addLog(`Solo mode: Aim blocked for ${key}`);
-          return prev;
-        }
-
-        next.set(key, { x, y, skin: data.skin });
-        return next;
-      });
-    };
-
-    const onAimOff = (data: AimOffPayload) => {
-      if (data.room && data.room !== room) return;
-
-      const key = resolvePlayerKey(data);
-      setAimPositions((prev) => {
-        const next = new Map(prev);
-        next.delete(key);
-        return next;
-      });
-
-      const playerName = data.name || resolvePlayerKey(data);
-      if (playerName !== "_display") {
-        // 혼자하기 모드 중인 플레이어가 나가면 방 완전 초기화
-        if (isSoloModeRef.current && playerName === soloPlayerRef.current) {
-          addLog(`Solo player left: ${playerName} - Resetting room`);
-
-          // 혼자하기 모드 해제
-          setIsSoloMode(false);
-          isSoloModeRef.current = false;
-          soloPlayerRef.current = null;
-
-          // 모든 상태 초기화
-          setPlayers(new Map());
-          setPlayerOrder([]);
-          setCurrentTurn(null);
-          setAimPositions(new Map());
-
-          socket.emit("turn-update", {
-            room: data.room,
-            currentTurn: null,
-          });
-
-          return;
-        }
-
-        setPlayers((prev) => {
-          const next = new Map(prev);
-          const player = prev.get(playerName);
-
-          if (player) {
-            next.set(playerName, { ...player, isConnected: false });
-            addLog(`Player left: ${playerName}`);
-
-            setCurrentTurn((currentTurn) => {
-              if (currentTurn === playerName) {
-                socket.emit("turn-update", {
-                  room: data.room,
-                  currentTurn: null,
-                });
-                return null;
-              }
-              return currentTurn;
-            });
-          }
-
-          return next;
-        });
-      }
-    };
-
-    const onDartThrown = (data: {
-      room: string;
-      name: string;
-      aim: { x: number; y: number };
-      score: number;
-    }) => {
-      if (data.room && data.room !== room) return;
-
-      const hitSound = new Audio("/sound/hit.mp3");
-      hitSound.play().catch((e) => console.error("Sound play failed:", e));
-
-      setPlayers((prev) => {
-        const next = new Map(prev);
-        const player = prev.get(data.name);
-
-        if (player) {
-          next.set(data.name, {
-            ...player,
-            score: player.score + data.score,
-            totalThrows: player.totalThrows + 1,
-          });
-          addLog(
-            `Score: ${data.name} ${player.score} -> ${
-              player.score + data.score
-            }`
-          );
-
-          const currentIndex = playerOrder.indexOf(data.name);
-          if (currentIndex !== -1 && playerOrder.length > 0) {
-            let nextIndex = (currentIndex + 1) % playerOrder.length;
-            const startIndex = nextIndex;
-            let foundNext = false;
-
-            while (!foundNext) {
-              const nextPlayer = playerOrder[nextIndex];
-              const nextPlayerData = next.get(nextPlayer);
-
-              if (nextPlayerData?.isConnected) {
-                setCurrentTurn(nextPlayer);
-                addLog(
-                  `Turn rotation: ${
-                    data.name
-                  } -> ${nextPlayer} (order: [${playerOrder.join(", ")}])`
-                );
-                socket.emit("turn-update", {
-                  room: data.room,
-                  currentTurn: nextPlayer,
-                });
-                foundNext = true;
-                break;
-              } else {
-                addLog(`Skipping ${nextPlayer} (not connected)`);
-              }
-
-              nextIndex = (nextIndex + 1) % playerOrder.length;
-
-              if (nextIndex === startIndex) {
-                setCurrentTurn(null);
-                socket.emit("turn-update", {
-                  room: data.room,
-                  currentTurn: null,
-                });
-                foundNext = true;
-                break;
-              }
-            }
-          }
-        }
-
-        return next;
-      });
-
-      window.dispatchEvent(new CustomEvent("DART_THROW", { detail: data }));
-    };
-
-    socket.on("aim-update", onAimUpdate);
-    socket.on("aim-off", onAimOff);
-    socket.on("dart-thrown", onDartThrown);
-
-    return () => {
-      socket.off("connect", onConnect);
-      socket.off("connect_error", onConnectError);
-      socket.off("disconnect", onDisconnect);
-      socket.off("clientInfo", onClientInfo);
-      socket.off("joinedRoom", onJoinedRoom);
-      socket.off("roomPlayerCount", onRoomPlayerCount);
-      socket.off("aim-update", onAimUpdate);
-      socket.off("aim-off", onAimOff);
-      socket.off("dart-thrown", onDartThrown);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [room, addLog]);
 
   return (
     <div
@@ -532,7 +188,7 @@ export default function DisplayPage() {
                       fontWeight: 600,
                     }}
                   >
-                    턴
+                    턴 ({Array.from(players.values())[0]?.currentThrows}/3)
                   </span>
                 )}
               </div>
@@ -540,37 +196,18 @@ export default function DisplayPage() {
                 {Array.from(players.values())[0]?.score}점
               </div>
               <div style={{ fontSize: 14, opacity: 0.7 }}>
-                {Array.from(players.values())[0]?.totalThrows}회 던짐 •{" "}
-                {Array.from(players.values())[0]?.isConnected ? "접속" : "나감"}
+                {Array.from(players.values())[0]?.totalThrows}회 던짐
+                {!isSoloMode && (
+                  <>
+                    {" • "}
+                    {Array.from(players.values())[0]?.isConnected
+                      ? Array.from(players.values())[0]?.isReady
+                        ? "준비 완료"
+                        : "대기 중"
+                      : "나감"}
+                  </>
+                )}
               </div>
-              {/* 혼자하기 버튼 */}
-              {players.size === 1 && !isSoloMode && (
-                <button
-                  onClick={startSoloMode}
-                  style={{
-                    marginTop: 12,
-                    padding: "10px 20px",
-                    fontSize: 14,
-                    fontWeight: 600,
-                    borderRadius: 8,
-                    border: "none",
-                    background:
-                      "linear-gradient(135deg, #FFD700 0%, #FFA500 100%)",
-                    color: "#000",
-                    cursor: "pointer",
-                    boxShadow: "0 4px 12px rgba(255, 215, 0, 0.3)",
-                    transition: "transform 0.2s",
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.transform = "scale(1.05)";
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.transform = "scale(1)";
-                  }}
-                >
-                  혼자하기 시작
-                </button>
-              )}
               {isSoloMode && (
                 <div style={{ fontSize: 12, color: "#FFD700", marginTop: 8 }}>
                   혼자하기 모드
@@ -595,64 +232,105 @@ export default function DisplayPage() {
             </div>
           )}
 
-          {/* 플레이어 2 */}
+          {/* 플레이어 2 - 혼자하기 모드에서는 숨김 */}
+          {!isSoloMode && (
+            <div
+              style={{
+                flex: 1,
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 8,
+                background: Array.from(players.values())[1]
+                  ? currentTurn === Array.from(players.values())[1]?.name
+                    ? "rgba(76, 175, 80, 0.3)"
+                    : "rgba(255, 255, 255, 0.05)"
+                  : "rgba(255, 255, 255, 0.05)",
+                padding: "20px",
+                borderRadius: 12,
+                border: Array.from(players.values())[1]
+                  ? currentTurn === Array.from(players.values())[1]?.name
+                    ? "3px solid #4CAF50"
+                    : "3px solid transparent"
+                  : "3px solid transparent",
+                transition: "all 0.3s ease",
+              }}
+            >
+              {Array.from(players.values())[1] ? (
+                <>
+                  <div
+                    style={{ display: "flex", alignItems: "center", gap: 8 }}
+                  >
+                    <span style={{ fontSize: 24, fontWeight: 700 }}>
+                      {Array.from(players.values())[1]?.name}
+                    </span>
+                    {currentTurn === Array.from(players.values())[1]?.name && (
+                      <span
+                        style={{
+                          fontSize: 12,
+                          background: "#4CAF50",
+                          color: "white",
+                          padding: "4px 8px",
+                          borderRadius: 6,
+                          fontWeight: 600,
+                        }}
+                      >
+                        턴 ({Array.from(players.values())[1]?.currentThrows}/3)
+                      </span>
+                    )}
+                  </div>
+                  <div
+                    style={{ fontSize: 48, fontWeight: 700, color: "#FFD700" }}
+                  >
+                    {Array.from(players.values())[1]?.score}점
+                  </div>
+                  <div style={{ fontSize: 14, opacity: 0.7 }}>
+                    {Array.from(players.values())[1]?.totalThrows}회 던짐 •{" "}
+                    {Array.from(players.values())[1]?.isConnected
+                      ? Array.from(players.values())[1]?.isReady
+                        ? "준비 완료"
+                        : "대기 중"
+                      : "나감"}
+                  </div>
+                </>
+              ) : (
+                <div style={{ fontSize: 16, opacity: 0.6 }}>
+                  플레이어를 기다리는 중...
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* 카운트다운 */}
+      {countdown !== null && (
+        <div
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            width: "100vw",
+            height: "100vh",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 100,
+            background: "rgba(0, 0, 0, 0.8)",
+            backdropFilter: "blur(10px)",
+          }}
+        >
           <div
             style={{
-              flex: 1,
-              display: "flex",
-              flexDirection: "column",
-              alignItems: "center",
-              justifyContent: "center",
-              gap: 8,
-              background: Array.from(players.values())[1]
-                ? currentTurn === Array.from(players.values())[1]?.name
-                  ? "rgba(76, 175, 80, 0.3)"
-                  : "rgba(255, 255, 255, 0.05)"
-                : "rgba(255, 255, 255, 0.05)",
-              padding: "20px",
-              borderRadius: 12,
-              border: Array.from(players.values())[1]
-                ? currentTurn === Array.from(players.values())[1]?.name
-                  ? "3px solid #4CAF50"
-                  : "3px solid transparent"
-                : "3px solid transparent",
-              transition: "all 0.3s ease",
+              fontSize: "200px",
+              fontWeight: "bold",
+              color: "#FFD700",
+              textShadow: "0 0 40px rgba(255, 215, 0, 0.8)",
+              animation: "pulse 0.5s ease-in-out",
             }}
           >
-            {Array.from(players.values())[1] ? (
-              <>
-                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <span style={{ fontSize: 24, fontWeight: 700 }}>
-                    {Array.from(players.values())[1]?.name}
-                  </span>
-                  {currentTurn === Array.from(players.values())[1]?.name && (
-                    <span
-                      style={{
-                        fontSize: 12,
-                        background: "#4CAF50",
-                        color: "white",
-                        padding: "4px 8px",
-                        borderRadius: 6,
-                        fontWeight: 600,
-                      }}
-                    >
-                      턴
-                    </span>
-                  )}
-                </div>
-                <div
-                  style={{ fontSize: 48, fontWeight: 700, color: "#FFD700" }}
-                >
-                  {Array.from(players.values())[1]?.score}점
-                </div>
-                <div style={{ fontSize: 14, opacity: 0.7 }}>
-                  {Array.from(players.values())[1]?.totalThrows}회 던짐 •{" "}
-                  {Array.from(players.values())[1]?.isConnected
-                    ? "접속"
-                    : "나감"}
-                </div>
-              </>
-            ) : null}
+            {countdown}
           </div>
         </div>
       )}
@@ -727,6 +405,11 @@ export default function DisplayPage() {
             // 혼자하기 모드일 때는 솔로 플레이어의 조준점만 표시
             if (isSoloMode && soloPlayerRef.current) {
               return playerKey === soloPlayerRef.current;
+            }
+            // 2인 모드일 때는 준비 완료된 플레이어만 조준점 표시
+            const player = players.get(playerKey);
+            if (!isSoloMode && player && !player.isReady) {
+              return false;
             }
             return true;
           })

@@ -19,7 +19,6 @@ export default function Target({
   const group = useRef<Group>(null);
   const { scene, animations } = useGLTF(modelPath);
 
-  // SkeletonUtils로 애니메이션이 있는 모델을 제대로 clone
   const clonedScene = useMemo(() => {
     return SkeletonUtils.clone(scene) as Object3D;
   }, [scene]);
@@ -27,9 +26,7 @@ export default function Target({
   const { actions, names } = useAnimations(animations, group);
 
   useEffect(() => {
-    // 모든 애니메이션 재생
     if (names.length > 0) {
-      // 모든 애니메이션 재생
       names.forEach((name) => {
         const action = actions[name];
         if (action) {
