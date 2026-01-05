@@ -1,4 +1,4 @@
-import { useEffect, useCallback } from "react";
+import { useEffect, useCallback, useRef } from "react";
 import { socket } from "@/shared/socket";
 
 interface UseMobileSocketProps {
@@ -24,6 +24,8 @@ export function useMobileSocket({
   onJoined,
   onTurnUpdate,
 }: UseMobileSocketProps) {
+  const throwCountRef = useRef(0);
+
   useEffect(() => {
     if (!room) return;
 
@@ -153,8 +155,55 @@ export function useMobileSocket({
     [room, customName]
   );
 
+  const emitThrowDart = useCallback(
+    (payload: { aim: { x: number; y: number }; score: number }) => {
+      if (!socket.connected || !customName) return;
+      socket.emit("throw-dart", {
+        room,
+        name: customName,
+        aim: payload.aim,
+        score: payload.score,
+      });
+
+      throwCountRef.current += 1;
+
+      if (throwCountRef.current >= 3) {
+        socket.emit("aim-off", {
+          room,
+          name: customName,
+        });
+        throwCountRef.current = 3;
+      }
+    },
+    [room, customName]
+  );
+
+  const emitFinishGame = useCallback(
+    (scores: Array<{ socketId: string; name: string; score: number }>) => {
+      if (!room) return;
+      socket.emit("finish-game", {
+        room,
+        scores,
+      });
+      socket.disconnect();
+    },
+    [room]
+  );
+
+  const emitAimOff = useCallback(() => {
+    if (!socket.connected || !customName) return;
+    socket.emit("aim-off", {
+      room,
+      name: customName,
+    });
+  }, [room, customName]);
+
   return {
     emitAimUpdate,
+    emitThrowDart,
+    emitFinishGame,
+    emitAimOff,
+    socketId: socket.id,
     isConnected: socket.connected,
   };
 }
