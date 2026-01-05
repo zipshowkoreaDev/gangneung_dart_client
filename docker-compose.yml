@@ -5,11 +5,12 @@ services:
       context: .
       dockerfile: Dockerfile
       args:
-        NEXT_PUBLIC_SOCKET_URL: https://socket-relay.zipshowkorea.com/climb
+        NEXT_PUBLIC_BASE_URL: https://develop.gangneung-dart.zipshowkorea.com
+        NEXT_PUBLIC_SOCKET_URL: https://socket-relay.zipshowkorea.com/dart
     environment:
       - NODE_ENV=production
     ports:
-      - "3390:3000"
+      - "3380:3000"
     networks:
       - app
     restart: always
