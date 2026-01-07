@@ -169,6 +169,12 @@ export default function MobilePage() {
     prevMagRef.current = 0;
     throwBlockedUntilRef.current = 0;
 
+    const isIOS =
+      typeof navigator !== "undefined" &&
+      /iPad|iPhone|iPod/.test(navigator.userAgent);
+    const gammaRange = isIOS ? 20 : 35;
+    const betaRange = isIOS ? 20 : 35;
+
     handleOrientationRef.current = (e: DeviceOrientationEvent) => {
       const gamma = e.gamma ?? 0;
       const beta = e.beta ?? 0;
@@ -186,8 +192,10 @@ export default function MobilePage() {
       const g = gamma - baseGammaRef.current;
       const b = beta - baseBetaRef.current;
 
-      const x = norm(g, -35, 35);
-      const y0 = -norm(b, -35, 35);
+      const x = norm(g, -gammaRange, gammaRange);
+      const y0 = isIOS
+        ? norm(b, -betaRange, betaRange)
+        : -norm(b, -betaRange, betaRange);
       const faceUp =
         Math.abs(gravityZRef.current) > 4 && gravityZRef.current < 0;
       const y = faceUp ? -y0 : y0;
@@ -591,3 +599,5 @@ export default function MobilePage() {
     </div>
   );
 }
+
+

@@ -202,7 +202,7 @@ export default function Scene() {
       <DartEventHandler onDartThrow={handleDartThrow} />
 
       {/* 기본 조명 - 전체 밝기 */}
-      <ambientLight intensity={1.5} />
+      <ambientLight intensity={1.5} color={"white"} />
 
       {/* 왼쪽 directionalLight */}
       <directionalLight
@@ -219,7 +219,7 @@ export default function Scene() {
       />
 
       {/* 상단 전체 조명 */}
-      <directionalLight position={[0, 20, 15]} intensity={0.5} />
+      <directionalLight position={[0, 20, 15]} intensity={1.5} />
 
       {/* 룰렛 모델 */}
       <RotatingRoulette flyingDarts={flyingDarts} stuckDarts={stuckDarts} />

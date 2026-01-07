@@ -7,17 +7,9 @@ import { QRCodeSVG } from "qrcode.react";
 import Scene from "@/three/Scene";
 import { socket } from "@/shared/socket";
 import { useDisplaySocket } from "@/hooks/useDisplaySocket";
+import Scoreboard, { PlayerScore } from "@/app/display/components/Scoreboard";
 
 type AimState = Map<string, { x: number; y: number; skin?: string }>;
-
-type PlayerScore = {
-  name: string;
-  score: number;
-  isConnected: boolean;
-  isReady: boolean;
-  totalThrows: number;
-  currentThrows: number;
-};
 
 function resolveColor(skin?: string) {
   if (skin === "red") return "#ff4d4d";
@@ -122,9 +114,8 @@ export default function DisplayPage() {
 
   return (
     <div
+      className="w-full h-full"
       style={{
-        width: "100vw",
-        height: "100vh",
         position: "relative",
         overflow: "hidden",
         backgroundImage: "url(/04_roulette_BG.webp)",
@@ -134,177 +125,12 @@ export default function DisplayPage() {
       }}
     >
       {/* 스코어보드 - 상단 가로 배치 */}
-      {isMounted && (
-        <div
-          style={{
-            position: "fixed",
-            top: 0,
-            left: 0,
-            width: "100%",
-            zIndex: 10,
-            background: "rgba(0, 0, 0, 0.85)",
-            color: "white",
-            padding: "20px",
-            fontFamily: "monospace",
-            boxShadow: "0 4px 24px rgba(0,0,0,0.6)",
-            backdropFilter: "blur(10px)",
-            display: "flex",
-            gap: 20,
-          }}
-        >
-          {/* 플레이어 1 */}
-          {Array.from(players.values())[0] ? (
-            <div
-              style={{
-                flex: 1,
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                justifyContent: "center",
-                gap: 8,
-                background:
-                  currentTurn === Array.from(players.values())[0]?.name
-                    ? "rgba(76, 175, 80, 0.3)"
-                    : "rgba(255, 255, 255, 0.05)",
-                padding: "20px",
-                borderRadius: 12,
-                border:
-                  currentTurn === Array.from(players.values())[0]?.name
-                    ? "3px solid #4CAF50"
-                    : "3px solid transparent",
-                transition: "all 0.3s ease",
-              }}
-            >
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <span style={{ fontSize: 24, fontWeight: 700 }}>
-                  {Array.from(players.values())[0]?.name}
-                </span>
-                {currentTurn === Array.from(players.values())[0]?.name && (
-                  <span
-                    style={{
-                      fontSize: 12,
-                      background: "#4CAF50",
-                      color: "white",
-                      padding: "4px 8px",
-                      borderRadius: 6,
-                      fontWeight: 600,
-                    }}
-                  >
-                    턴 ({Array.from(players.values())[0]?.currentThrows}/3)
-                  </span>
-                )}
-              </div>
-              <div style={{ fontSize: 48, fontWeight: 700, color: "#FFD700" }}>
-                {Array.from(players.values())[0]?.score}점
-              </div>
-              <div style={{ fontSize: 14, opacity: 0.7 }}>
-                {Array.from(players.values())[0]?.totalThrows}회 던짐
-                {!isSoloMode && (
-                  <>
-                    {" • "}
-                    {Array.from(players.values())[0]?.isConnected
-                      ? Array.from(players.values())[0]?.isReady
-                        ? "준비 완료"
-                        : "대기 중"
-                      : "나감"}
-                  </>
-                )}
-              </div>
-              {isSoloMode && (
-                <div style={{ fontSize: 12, color: "#FFD700", marginTop: 8 }}>
-                  혼자하기 모드
-                </div>
-              )}
-            </div>
-          ) : (
-            <div
-              style={{
-                flex: 1,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                background: "rgba(255, 255, 255, 0.05)",
-                padding: "20px",
-                borderRadius: 12,
-                fontSize: 16,
-                opacity: 0.6,
-              }}
-            >
-              플레이어를 기다리는 중...
-            </div>
-          )}
-
-          {/* 플레이어 2 - 혼자하기 모드에서는 숨김 */}
-          {!isSoloMode && (
-            <div
-              style={{
-                flex: 1,
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                justifyContent: "center",
-                gap: 8,
-                background: Array.from(players.values())[1]
-                  ? currentTurn === Array.from(players.values())[1]?.name
-                    ? "rgba(76, 175, 80, 0.3)"
-                    : "rgba(255, 255, 255, 0.05)"
-                  : "rgba(255, 255, 255, 0.05)",
-                padding: "20px",
-                borderRadius: 12,
-                border: Array.from(players.values())[1]
-                  ? currentTurn === Array.from(players.values())[1]?.name
-                    ? "3px solid #4CAF50"
-                    : "3px solid transparent"
-                  : "3px solid transparent",
-                transition: "all 0.3s ease",
-              }}
-            >
-              {Array.from(players.values())[1] ? (
-                <>
-                  <div
-                    style={{ display: "flex", alignItems: "center", gap: 8 }}
-                  >
-                    <span style={{ fontSize: 24, fontWeight: 700 }}>
-                      {Array.from(players.values())[1]?.name}
-                    </span>
-                    {currentTurn === Array.from(players.values())[1]?.name && (
-                      <span
-                        style={{
-                          fontSize: 12,
-                          background: "#4CAF50",
-                          color: "white",
-                          padding: "4px 8px",
-                          borderRadius: 6,
-                          fontWeight: 600,
-                        }}
-                      >
-                        턴 ({Array.from(players.values())[1]?.currentThrows}/3)
-                      </span>
-                    )}
-                  </div>
-                  <div
-                    style={{ fontSize: 48, fontWeight: 700, color: "#FFD700" }}
-                  >
-                    {Array.from(players.values())[1]?.score}점
-                  </div>
-                  <div style={{ fontSize: 14, opacity: 0.7 }}>
-                    {Array.from(players.values())[1]?.totalThrows}회 던짐 •{" "}
-                    {Array.from(players.values())[1]?.isConnected
-                      ? Array.from(players.values())[1]?.isReady
-                        ? "준비 완료"
-                        : "대기 중"
-                      : "나감"}
-                  </div>
-                </>
-              ) : (
-                <div style={{ fontSize: 16, opacity: 0.6 }}>
-                  플레이어를 기다리는 중...
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-      )}
+      <Scoreboard
+        isMounted={isMounted}
+        players={players}
+        currentTurn={currentTurn}
+        isSoloMode={isSoloMode}
+      />
 
       {/* 카운트다운 */}
       {countdown !== null && (
@@ -348,7 +174,6 @@ export default function DisplayPage() {
           color: "white",
           padding: "15px 20px",
           borderRadius: 8,
-          fontFamily: "monospace",
           boxShadow: "0 8px 32px rgba(0,0,0,0.6)",
           backdropFilter: "blur(10px)",
         }}
@@ -497,7 +322,6 @@ export default function DisplayPage() {
           dpr={[1, 2]}
           gl={{ antialias: true }}
         >
-          {/* <Machine /> */}
           <Scene />
         </Canvas>
       </div>

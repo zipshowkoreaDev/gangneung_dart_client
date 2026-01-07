@@ -37,6 +37,14 @@ function clamp(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n));
 }
 
+const HIT_RADIUS = 0.6;
+
+function getHitScore(aim?: { x: number; y: number }) {
+  const x = clamp(aim?.x ?? 0, -1, 1);
+  const y = clamp(aim?.y ?? 0, -1, 1);
+  return Math.hypot(x, y) <= HIT_RADIUS ? 1 : 0;
+}
+
 function resolvePlayerKey(data: {
   playerId?: string;
   name?: string;
@@ -155,6 +163,12 @@ export function useDisplaySocket({
     }) => {
       if (data.room && data.room !== room) return;
 
+      if (!playersRef.current.has(data.name)) {
+        onLog(`Ignored dart from unknown player ${data.name}`);
+        return;
+      }
+
+      const score = getHitScore(data.aim);
       const hitSound = new Audio("/sound/hit.mp3");
       hitSound.play().catch((e) => console.error("Sound play failed:", e));
 
@@ -168,13 +182,13 @@ export function useDisplaySocket({
 
           next.set(data.name, {
             ...player,
-            score: player.score + data.score,
+            score: player.score + score,
             totalThrows: player.totalThrows + 1,
             currentThrows: isLastThrow ? 0 : newCurrentThrows,
           });
           onLog(
             `Score: ${data.name} ${player.score} -> ${
-              player.score + data.score
+              player.score + score
             } (Throw ${newCurrentThrows}/3)`
           );
         }
@@ -182,7 +196,9 @@ export function useDisplaySocket({
         return next;
       });
 
-      window.dispatchEvent(new CustomEvent("DART_THROW", { detail: data }));
+      window.dispatchEvent(
+        new CustomEvent("DART_THROW", { detail: { ...data, score } })
+      );
     };
 
     // 5. aim-update
@@ -197,6 +213,14 @@ export function useDisplaySocket({
       if (data.room && data.room !== room) return;
 
       const key = resolvePlayerKey(data);
+      const isSoloRunning =
+        isSoloModeRef.current &&
+        Array.from(playersRef.current.values()).some((player) => player.isReady);
+
+      if (isSoloRunning && key && !playersRef.current.has(key)) {
+        onLog(`Solo running: ignore new player ${key}`);
+        return;
+      }
       const x = clamp(data.aim?.x ?? 0, -1, 1);
       const y = clamp(data.aim?.y ?? 0, -1, 1);
 
