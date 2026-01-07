@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, useCallback } from "react";
+import { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import { Canvas } from "@react-three/fiber";
 import { QRCodeSVG } from "qrcode.react";
 
@@ -38,6 +38,7 @@ export default function DisplayPage() {
   const [playerOrder, setPlayerOrder] = useState<string[]>([]);
   const [isSoloMode, setIsSoloMode] = useState(false);
   const [countdown, setCountdown] = useState<number | null>(null);
+  const soloPlayerRef = useRef<string | null>(null);
 
   useEffect(() => {
     console.log("DisplayPage mounted", { room });
@@ -53,7 +54,7 @@ export default function DisplayPage() {
   }, []);
 
   // 소켓 통신 훅 사용
-  const { soloPlayerRef } = useDisplaySocket({
+  useDisplaySocket({
     room,
     onLog: addLog,
     setAimPositions,
@@ -64,7 +65,8 @@ export default function DisplayPage() {
     setCountdown,
     players,
     playerOrder,
-    countdown,
+    currentTurn,
+    isSoloMode,
   });
 
   // 카운트다운 처리

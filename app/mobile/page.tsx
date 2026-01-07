@@ -1,16 +1,15 @@
 "use client";
 
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import { useMobileSocket } from "@/hooks/useMobileSocket";
 
-type ConnectionState =
-  | "idle"
-  | "connecting"
-  | "connected"
-  | "joined"
-  | "waiting-display"
-  | "ready"
-  | "rejected";
+const ARMING_MS = 600;
+const MAG_THRESH = 18;
+const JERK_THRESH = 8;
+const THROW_COOLDOWN_MS = 700;
+const AIM_HZ = 30;
+const AIM_INTERVAL = 1000 / AIM_HZ;
+const BASELINE_SAMPLES = 12;
 
 export default function MobilePage() {
   const [room] = useState(() => {
@@ -23,105 +22,274 @@ export default function MobilePage() {
   });
   const [customName, setCustomName] = useState("");
   const [playerCount, setPlayerCount] = useState(0);
-  const [isRoomFull, setIsRoomFull] = useState(false);
-  const [isRejected, setIsRejected] = useState(false);
   const [selectedMode, setSelectedMode] = useState<"solo" | "duo" | null>(null);
-  const [shouldConnect, setShouldConnect] = useState(false);
-  const [connectionState, setConnectionState] = useState<ConnectionState>(
-    "idle"
-  );
   const [nameError, setNameError] = useState("");
+  const [isInGame, setIsInGame] = useState(false);
+  const [aimPosition, setAimPosition] = useState({ x: 0, y: 0 });
+  const [sensorsReady, setSensorsReady] = useState(false);
+  const [sensorError, setSensorError] = useState("");
 
-  const addLog = useCallback((msg: string) => {
-    const timestamp = new Date().toLocaleTimeString();
-    console.log(`[${timestamp}] ${msg}`);
-  }, []);
+  const emitRef = useRef<{
+    aimUpdate: (aim: { x: number; y: number }, skin?: string) => void;
+    aimOff: () => void;
+    throwDart: (payload: {
+      aim: { x: number; y: number };
+      score: number;
+    }) => void;
+  }>({
+    aimUpdate: () => {},
+    aimOff: () => {},
+    throwDart: () => {},
+  });
 
-  const emitRef = useRef<(aim: { x: number; y: number }, skin?: string) => void>(
-    () => {}
-  );
+  // 이름이 있으면 바로 소켓 연결
+  const shouldConnect = customName.length > 0;
 
-  const { emitAimUpdate } = useMobileSocket({
+  const { emitAimUpdate, emitAimOff, emitThrowDart } = useMobileSocket({
     room: shouldConnect ? room : "",
     customName,
-    onLog: addLog,
-    onSetPlayerCount: setPlayerCount,
-    onSetIsRoomFull: setIsRoomFull,
-    onSetIsRejected: setIsRejected,
-    onConnected: () => setConnectionState("connected"),
-    onJoined: (data) => {
-      addLog(
-        `Joined room with ${Math.max(0, data.playerCount - 1)} other players`
-      );
-      setConnectionState("joined");
-
-      if (selectedMode === "solo") {
-        setConnectionState("ready");
-        emitRef.current({ x: 888, y: 888 });
-        addLog(`Solo mode selected: ${customName}`);
-      } else if (selectedMode === "duo") {
-        setConnectionState("waiting-display");
-        emitRef.current({ x: 999, y: 999 });
-        addLog(`Duo mode selected: ${customName} (waiting for display)`);
-      }
-    },
-    onTurnUpdate: (currentTurn) => {
-      if (selectedMode === "duo" && currentTurn) {
-        setConnectionState("ready");
-      }
-    },
+    onPlayerCountChange: setPlayerCount,
   });
 
   useEffect(() => {
-    emitRef.current = emitAimUpdate;
-  }, [emitAimUpdate]);
+    emitRef.current = {
+      aimUpdate: emitAimUpdate,
+      aimOff: emitAimOff,
+      throwDart: emitThrowDart,
+    };
+  }, [emitAimUpdate, emitAimOff, emitThrowDart]);
+
+  const sensorsActiveRef = useRef(false);
+  const lastAimSentRef = useRef(0);
+  const gravityZRef = useRef(0);
+  const aimRef = useRef(aimPosition);
+  const readyRef = useRef(true);
+  const aimReadyRef = useRef(false);
+  const throwCountRef = useRef(0);
+  const baseGammaSumRef = useRef(0);
+  const baseBetaSumRef = useRef(0);
+  const baseSamplesRef = useRef(0);
+  const baseGammaRef = useRef(0);
+  const baseBetaRef = useRef(0);
+  const armedAtRef = useRef(0);
+  const baselineSumRef = useRef(0);
+  const baselineSamplesRef = useRef(0);
+  const prevMagRef = useRef(0);
+  const throwBlockedUntilRef = useRef(0);
+  const handleOrientationRef = useRef<
+    ((e: DeviceOrientationEvent) => void) | null
+  >(null);
+  const handleMotionRef = useRef<((e: DeviceMotionEvent) => void) | null>(null);
+
+  const norm = (v: number, a: number, b: number) =>
+    Math.max(-1, Math.min(1, ((v - a) / (b - a)) * 2 - 1));
+
+  const requestMotionPermission = async (): Promise<boolean> => {
+    try {
+      if (
+        typeof DeviceMotionEvent !== "undefined" &&
+        "requestPermission" in DeviceMotionEvent
+      ) {
+        const result = await (
+          DeviceMotionEvent as unknown as {
+            requestPermission(): Promise<string>;
+          }
+        ).requestPermission();
+        if (result !== "granted") {
+          setSensorError("모션 권한이 필요합니다.");
+          return false;
+        }
+      }
+
+      if (
+        typeof DeviceOrientationEvent !== "undefined" &&
+        "requestPermission" in DeviceOrientationEvent
+      ) {
+        const result = await (
+          DeviceOrientationEvent as unknown as {
+            requestPermission(): Promise<string>;
+          }
+        ).requestPermission();
+        if (result !== "granted") {
+          setSensorError("방향 권한이 필요합니다.");
+          return false;
+        }
+      }
+
+      setSensorError("");
+      return true;
+    } catch {
+      setSensorError("센서 권한 요청에 실패했습니다.");
+      return false;
+    }
+  };
+
+  const stopSensors = useCallback(() => {
+    if (!sensorsActiveRef.current) return;
+
+    sensorsActiveRef.current = false;
+    setSensorsReady(false);
+    readyRef.current = true;
+    throwCountRef.current = 0;
+    baseGammaSumRef.current = 0;
+    baseBetaSumRef.current = 0;
+    baseSamplesRef.current = 0;
+
+    if (handleOrientationRef.current) {
+      window.removeEventListener(
+        "deviceorientation",
+        handleOrientationRef.current
+      );
+      handleOrientationRef.current = null;
+    }
+    if (handleMotionRef.current) {
+      window.removeEventListener("devicemotion", handleMotionRef.current);
+      handleMotionRef.current = null;
+    }
+
+    emitRef.current.aimOff();
+  }, []);
+
+  const startSensors = useCallback(() => {
+    if (sensorsActiveRef.current) return;
+
+    sensorsActiveRef.current = true;
+    setSensorsReady(true);
+    readyRef.current = true;
+    aimReadyRef.current = false;
+    throwCountRef.current = 0;
+    baseGammaSumRef.current = 0;
+    baseBetaSumRef.current = 0;
+    baseSamplesRef.current = 0;
+    baseGammaRef.current = 0;
+    baseBetaRef.current = 0;
+    armedAtRef.current = performance.now();
+    baselineSumRef.current = 0;
+    baselineSamplesRef.current = 0;
+    prevMagRef.current = 0;
+    throwBlockedUntilRef.current = 0;
+
+    handleOrientationRef.current = (e: DeviceOrientationEvent) => {
+      const gamma = e.gamma ?? 0;
+      const beta = e.beta ?? 0;
+
+      if (baseSamplesRef.current < BASELINE_SAMPLES) {
+        baseGammaSumRef.current += gamma;
+        baseBetaSumRef.current += beta;
+        baseSamplesRef.current += 1;
+        if (baseSamplesRef.current === BASELINE_SAMPLES) {
+          baseGammaRef.current = baseGammaSumRef.current / BASELINE_SAMPLES;
+          baseBetaRef.current = baseBetaSumRef.current / BASELINE_SAMPLES;
+        }
+      }
+
+      const g = gamma - baseGammaRef.current;
+      const b = beta - baseBetaRef.current;
+
+      const x = norm(g, -35, 35);
+      const y0 = -norm(b, -35, 35);
+      const faceUp =
+        Math.abs(gravityZRef.current) > 4 && gravityZRef.current < 0;
+      const y = faceUp ? -y0 : y0;
+
+      aimRef.current = { x, y };
+      setAimPosition({ x, y });
+      aimReadyRef.current = true;
+
+      const now = performance.now();
+      if (now - lastAimSentRef.current > AIM_INTERVAL) {
+        lastAimSentRef.current = now;
+        emitRef.current.aimUpdate({ x, y });
+      }
+    };
+
+    handleMotionRef.current = (e: DeviceMotionEvent) => {
+      const ag = e.accelerationIncludingGravity || { x: 0, y: 0, z: 0 };
+      gravityZRef.current = ag.z || 0;
+
+      const now = performance.now();
+      if (now < throwBlockedUntilRef.current) {
+        return;
+      }
+
+      const a = e.acceleration || ag;
+      const mag = Math.hypot(a.x || 0, a.y || 0, a.z || 0);
+
+      if (now - armedAtRef.current < ARMING_MS) {
+        baselineSumRef.current += mag;
+        baselineSamplesRef.current += 1;
+        prevMagRef.current = mag;
+        return;
+      }
+
+      const baseline = baselineSamplesRef.current
+        ? baselineSumRef.current / baselineSamplesRef.current
+        : 0;
+      const magAdj = Math.max(0, mag - baseline);
+      const jerk = mag - prevMagRef.current;
+      prevMagRef.current = mag;
+
+      if (
+        readyRef.current &&
+        aimReadyRef.current &&
+        magAdj > MAG_THRESH &&
+        jerk > JERK_THRESH
+      ) {
+        readyRef.current = false;
+        throwBlockedUntilRef.current = now + THROW_COOLDOWN_MS;
+
+        emitRef.current.throwDart({
+          aim: aimRef.current,
+          score: 0,
+        });
+        throwCountRef.current += 1;
+        if (throwCountRef.current >= 3) {
+          stopSensors();
+          return;
+        }
+
+        setTimeout(() => {
+          if (!sensorsActiveRef.current) return;
+          readyRef.current = true;
+          armedAtRef.current = performance.now();
+          baselineSumRef.current = 0;
+          baselineSamplesRef.current = 0;
+          prevMagRef.current = 0;
+        }, 300);
+      }
+    };
+
+    window.addEventListener("deviceorientation", handleOrientationRef.current);
+    window.addEventListener("devicemotion", handleMotionRef.current);
+  }, [stopSensors]);
 
   useEffect(() => {
-    if (shouldConnect) {
-      addLog(`Room: ${room}`);
-      setConnectionState((prev) => (prev === "idle" ? "connecting" : prev));
-    }
-  }, [room, shouldConnect, addLog]);
+    return () => stopSensors();
+  }, [stopSensors]);
 
-  useEffect(() => {
-    if (isRoomFull || isRejected) {
-      setConnectionState("rejected");
-    }
-  }, [isRoomFull, isRejected]);
-
-  const handleModeSelect = (mode: "solo" | "duo") => {
+  const handleModeSelect = async (mode: "solo" | "duo") => {
     if (!customName) {
-      addLog("이름을 먼저 입력해주세요");
       setNameError("이름을 입력하면 시작할 수 있어요");
       return;
     }
 
+    if (mode === "solo" && playerCount > 1) {
+      setNameError("다른 플레이어가 있어 혼자하기를 할 수 없습니다");
+      return;
+    }
+
+    const hasPermission = await requestMotionPermission();
+    if (!hasPermission) {
+      return;
+    }
+
     setNameError("");
-    setShouldConnect(true);
     setSelectedMode(mode);
-    setConnectionState("connecting");
+    setIsInGame(true);
+    startSensors();
   };
 
-  const visiblePlayerCount = Math.max(0, playerCount - 1);
-  const statusMessage = (() => {
-    if (isRoomFull) {
-      return isRejected
-        ? "현재 혼자하기 모드로 진행 중입니다."
-        : "최대 인원이 가득 찼습니다.";
-    }
-    if (selectedMode === "duo" && connectionState === "waiting-display") {
-      return "디스플레이에서 준비를 확인 중입니다. 잠시만 기다려주세요.";
-    }
-    if (connectionState === "connecting") return "소켓에 연결 중...";
-    if (connectionState === "connected") return "방 참여를 시도하는 중...";
-    if (connectionState === "joined" && selectedMode === "duo")
-      return "둘이서 하기 준비 신호를 보냈습니다.";
-    if (connectionState === "ready" && selectedMode === "solo")
-      return "혼자하기 준비 완료! 바로 시작하세요.";
-    if (connectionState === "ready" && selectedMode === "duo")
-      return "둘이서 하기 준비 완료!";
-    return "";
-  })();
+  const isSoloDisabled = !customName || playerCount > 1;
 
   return (
     <div
@@ -136,38 +304,128 @@ export default function MobilePage() {
         padding: "0 20px",
       }}
     >
-      {isRoomFull ? (
+      {isInGame ? (
         <div
           style={{
-            textAlign: "center",
-            color: "white",
+            width: "100%",
+            height: "100%",
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            justifyContent: "center",
           }}
         >
           <div
             style={{
-              fontSize: "24px",
+              position: "absolute",
+              top: "20px",
+              left: "50%",
+              transform: "translateX(-50%)",
+              color: "white",
+              fontSize: "18px",
               fontWeight: 700,
-              color: "#ff3d00",
-              marginBottom: "16px",
+              textAlign: "center",
             }}
           >
-            {isRejected ? "입장이 거부되었습니다" : "방이 가득 찼습니다"}
+            <div>{customName}</div>
+            <div style={{ fontSize: "14px", opacity: 0.7, marginTop: "4px" }}>
+              {selectedMode === "solo" ? "혼자하기" : "둘이서 하기"} 모드
+            </div>
           </div>
-          <div style={{ fontSize: "14px", opacity: 0.7, lineHeight: 1.5 }}>
-            {isRejected ? (
-              <>
-                현재 혼자하기 모드로 게임이 진행 중입니다.
-                <br />
-                다른 방에 입장해주세요.
-              </>
-            ) : (
-              <>
-                최대 2명까지만 참가할 수 있습니다.
-                <br />
-                다른 플레이어가 나갈 때까지 기다려주세요.
-              </>
-            )}
+
+          {/* 자이로 조준 패드 */}
+          <div
+            style={{
+              width: "90%",
+              maxWidth: "500px",
+              height: "60vh",
+              background: "rgba(255, 255, 255, 0.1)",
+              borderRadius: "24px",
+              border: "3px solid rgba(255, 255, 255, 0.3)",
+              position: "relative",
+              backdropFilter: "blur(10px)",
+            }}
+          >
+            <div
+              style={{
+                position: "absolute",
+                top: "50%",
+                left: "50%",
+                transform: `translate(calc(-50% + ${
+                  aimPosition.x * 45
+                }%), calc(-50% + ${aimPosition.y * 45}%))`,
+                width: "60px",
+                height: "60px",
+                borderRadius: "50%",
+                border: "4px solid #FFD700",
+                background: "rgba(255, 215, 0, 0.3)",
+                pointerEvents: "none",
+                transition: "transform 0.05s ease-out",
+              }}
+            />
+            <div
+              style={{
+                position: "absolute",
+                top: "50%",
+                left: "50%",
+                transform: "translate(-50%, -50%)",
+                color: "white",
+                fontSize: "14px",
+                opacity: 0.5,
+                pointerEvents: "none",
+              }}
+            >
+              휴대폰을 기울여 조준하세요
+            </div>
           </div>
+
+          <div
+            style={{
+              marginTop: "20px",
+              color: "white",
+              fontSize: "12px",
+              opacity: 0.6,
+            }}
+          >
+            X: {aimPosition.x.toFixed(2)}, Y: {aimPosition.y.toFixed(2)}
+          </div>
+
+          {!sensorsReady && (
+            <button
+              onClick={async () => {
+                const ok = await requestMotionPermission();
+                if (ok) {
+                  startSensors();
+                }
+              }}
+              style={{
+                marginTop: "12px",
+                padding: "12px 20px",
+                fontSize: "14px",
+                fontWeight: 600,
+                borderRadius: "999px",
+                border: "none",
+                background: "rgba(255, 255, 255, 0.2)",
+                color: "white",
+                cursor: "pointer",
+              }}
+            >
+              자이로 권한 다시 요청
+            </button>
+          )}
+
+          {sensorError && (
+            <div
+              style={{
+                marginTop: "10px",
+                color: "#ffdddd",
+                fontSize: "12px",
+                opacity: 0.8,
+              }}
+            >
+              {sensorError}
+            </div>
+          )}
         </div>
       ) : selectedMode ? (
         <div
@@ -189,20 +447,8 @@ export default function MobilePage() {
             플레이어: {customName}
           </div>
           <div style={{ fontSize: "14px", opacity: 0.6, marginTop: "8px" }}>
-            현재 인원: {visiblePlayerCount}명
+            현재 인원: {playerCount}명
           </div>
-          {statusMessage && (
-            <div
-              style={{
-                fontSize: "13px",
-                opacity: 0.7,
-                marginTop: "12px",
-                lineHeight: 1.5,
-              }}
-            >
-              {statusMessage}
-            </div>
-          )}
         </div>
       ) : (
         <>
@@ -251,7 +497,7 @@ export default function MobilePage() {
               }}
             />
 
-            {shouldConnect && (
+            {playerCount > 0 && (
               <div
                 style={{
                   fontSize: "14px",
@@ -260,7 +506,8 @@ export default function MobilePage() {
                   textAlign: "center",
                 }}
               >
-                현재 방 인원: {visiblePlayerCount}명
+                현재 방 인원: {playerCount}명
+                {playerCount > 1 && " (혼자하기 불가)"}
               </div>
             )}
             {nameError && (
@@ -288,26 +535,31 @@ export default function MobilePage() {
           >
             <button
               onClick={() => handleModeSelect("solo")}
-              disabled={!customName}
+              disabled={isSoloDisabled}
               style={{
                 padding: "20px 40px",
                 fontSize: "24px",
                 fontWeight: "bold",
                 borderRadius: "16px",
                 border: "none",
-                background: !customName
+                background: isSoloDisabled
                   ? "#888"
                   : "linear-gradient(135deg, #FFD700 0%, #FFA500 100%)",
-                color: !customName ? "#ccc" : "#000",
-                cursor: !customName ? "not-allowed" : "pointer",
-                boxShadow: !customName
+                color: isSoloDisabled ? "#ccc" : "#000",
+                cursor: isSoloDisabled ? "not-allowed" : "pointer",
+                boxShadow: isSoloDisabled
                   ? "none"
                   : "0 8px 32px rgba(255, 215, 0, 0.4)",
-                opacity: !customName ? 0.5 : 1,
+                opacity: isSoloDisabled ? 0.5 : 1,
                 transition: "all 0.3s ease",
               }}
             >
               혼자
+              {playerCount > 1 && (
+                <div style={{ fontSize: "12px", marginTop: "4px" }}>
+                  (다른 플레이어 있음)
+                </div>
+              )}
             </button>
 
             <button
@@ -335,27 +587,6 @@ export default function MobilePage() {
             </button>
           </div>
         </>
-      )}
-      {statusMessage && selectedMode === null && (
-        <div
-          style={{
-            position: "absolute",
-            bottom: "24px",
-            left: "50%",
-            transform: "translateX(-50%)",
-            color: "white",
-            fontSize: "14px",
-            opacity: 0.9,
-            textAlign: "center",
-            padding: "10px 16px",
-            background: "rgba(0,0,0,0.4)",
-            borderRadius: "12px",
-            maxWidth: "320px",
-            lineHeight: 1.5,
-          }}
-        >
-          {statusMessage}
-        </div>
       )}
     </div>
   );
