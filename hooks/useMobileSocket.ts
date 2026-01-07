@@ -6,6 +6,7 @@ interface UseMobileSocketProps {
   customName: string;
   onPlayerCountChange?: (count: number) => void;
   onOtherPlayerActive?: (active: boolean) => void;
+  onTurnUpdate?: (currentTurn: string | null) => void;
 }
 
 export function useMobileSocket({
@@ -13,6 +14,7 @@ export function useMobileSocket({
   customName,
   onPlayerCountChange,
   onOtherPlayerActive,
+  onTurnUpdate,
 }: UseMobileSocketProps) {
   const throwCountRef = useRef(0);
   const otherPlayerTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
@@ -85,11 +87,36 @@ export function useMobileSocket({
       markOtherPlayerActive();
     };
 
+    const handleTurnUpdate = (data: {
+      room?: string;
+      currentTurn?: string | null;
+    }) => {
+      if (data.room && data.room !== room) return;
+      onTurnUpdate?.(data.currentTurn ?? null);
+    };
+
+    const handleSelectMode = (data: {
+      room?: string;
+      name?: string;
+      mode?: "solo" | "duo";
+    }) => {
+      if (data.room && data.room !== room) return;
+      if (!data.name || data.name === customName || data.name === "_display") {
+        return;
+      }
+      // 다른 플레이어가 모드를 선택하면 활성화로 표시
+      if (data.mode === "solo") {
+        markOtherPlayerActive();
+      }
+    };
+
     socket.on("connect", handleConnect);
     socket.on("joinedRoom", handleJoinedRoom);
     socket.on("roomPlayerCount", handleRoomPlayerCount);
     socket.on("aim-update", handleAimUpdate);
     socket.on("dart-thrown", handleDartThrown);
+    socket.on("turn-update", handleTurnUpdate);
+    socket.on("select-mode", handleSelectMode);
 
     return () => {
       socket.off("connect", handleConnect);
@@ -97,6 +124,8 @@ export function useMobileSocket({
       socket.off("roomPlayerCount", handleRoomPlayerCount);
       socket.off("aim-update", handleAimUpdate);
       socket.off("dart-thrown", handleDartThrown);
+      socket.off("turn-update", handleTurnUpdate);
+      socket.off("select-mode", handleSelectMode);
 
       if (otherPlayerTimeoutRef.current) {
         clearTimeout(otherPlayerTimeoutRef.current);
@@ -108,7 +137,7 @@ export function useMobileSocket({
         socket.disconnect();
       }
     };
-  }, [room, customName, onPlayerCountChange]);
+  }, [room, customName, onPlayerCountChange, onOtherPlayerActive, onTurnUpdate]);
 
   const emitAimUpdate = useCallback(
     (aim: { x: number; y: number }, skin?: string) => {
@@ -166,11 +195,24 @@ export function useMobileSocket({
     });
   }, [room, customName]);
 
+  const emitSelectMode = useCallback(
+    (mode: "solo" | "duo") => {
+      if (!socket.connected || !customName) return;
+      socket.emit("select-mode", {
+        room,
+        name: customName,
+        mode,
+      });
+    },
+    [room, customName]
+  );
+
   return {
     emitAimUpdate,
     emitThrowDart,
     emitFinishGame,
     emitAimOff,
+    emitSelectMode,
     socketId: socket.id,
     isConnected: socket.connected,
   };

@@ -25,11 +25,14 @@ export default function MobilePage() {
   const [selectedMode, setSelectedMode] = useState<"solo" | "duo" | null>(null);
   const [nameError, setNameError] = useState("");
   const [isInGame, setIsInGame] = useState(false);
+  const [isWaitingForDuo, setIsWaitingForDuo] = useState(false);
   const [aimPosition, setAimPosition] = useState({ x: 0, y: 0 });
   const [sensorsReady, setSensorsReady] = useState(false);
   const [sensorError, setSensorError] = useState("");
   const [otherPlayerActive, setOtherPlayerActive] = useState(false);
   const [throwsLeft, setThrowsLeft] = useState(3);
+  const [currentTurn, setCurrentTurn] = useState<string | null>(null);
+  const [hasFinishedTurn, setHasFinishedTurn] = useState(false);
 
   const emitRef = useRef<{
     aimUpdate: (aim: { x: number; y: number }, skin?: string) => void;
@@ -38,20 +41,36 @@ export default function MobilePage() {
       aim: { x: number; y: number };
       score: number;
     }) => void;
+    selectMode: (mode: "solo" | "duo") => void;
   }>({
     aimUpdate: () => {},
     aimOff: () => {},
     throwDart: () => {},
+    selectMode: () => {},
   });
 
   // 이름이 있으면 바로 소켓 연결
   const shouldConnect = customName.length > 0;
 
-  const { emitAimUpdate, emitAimOff, emitThrowDart } = useMobileSocket({
+  // 콜백 함수들을 useCallback으로 안정화
+  const handlePlayerCountChange = useCallback((count: number) => {
+    setPlayerCount(count);
+  }, []);
+
+  const handleOtherPlayerActive = useCallback((active: boolean) => {
+    setOtherPlayerActive(active);
+  }, []);
+
+  const handleTurnUpdate = useCallback((turn: string | null) => {
+    setCurrentTurn(turn);
+  }, []);
+
+  const { emitAimUpdate, emitAimOff, emitThrowDart, emitSelectMode } = useMobileSocket({
     room: shouldConnect ? room : "",
     customName,
-    onPlayerCountChange: setPlayerCount,
-    onOtherPlayerActive: setOtherPlayerActive,
+    onPlayerCountChange: handlePlayerCountChange,
+    onOtherPlayerActive: handleOtherPlayerActive,
+    onTurnUpdate: handleTurnUpdate,
   });
 
   useEffect(() => {
@@ -59,8 +78,9 @@ export default function MobilePage() {
       aimUpdate: emitAimUpdate,
       aimOff: emitAimOff,
       throwDart: emitThrowDart,
+      selectMode: emitSelectMode,
     };
-  }, [emitAimUpdate, emitAimOff, emitThrowDart]);
+  }, [emitAimUpdate, emitAimOff, emitThrowDart, emitSelectMode]);
 
   const sensorsActiveRef = useRef(false);
   const lastAimSentRef = useRef(0);
@@ -159,6 +179,7 @@ export default function MobilePage() {
 
     sensorsActiveRef.current = true;
     setSensorsReady(true);
+    setHasFinishedTurn(false);
     setThrowsLeft(3);
     readyRef.current = true;
     aimReadyRef.current = false;
@@ -248,6 +269,14 @@ export default function MobilePage() {
         magAdj > MAG_THRESH &&
         jerk > JERK_THRESH
       ) {
+        if (
+          selectedMode === "duo" &&
+          currentTurn &&
+          currentTurn !== customName
+        ) {
+          return;
+        }
+
         readyRef.current = false;
         throwBlockedUntilRef.current = now + THROW_COOLDOWN_MS;
 
@@ -258,6 +287,7 @@ export default function MobilePage() {
         throwCountRef.current += 1;
         setThrowsLeft((prev) => Math.max(0, prev - 1));
         if (throwCountRef.current >= 3) {
+          setHasFinishedTurn(true);
           stopSensors();
           return;
         }
@@ -275,7 +305,34 @@ export default function MobilePage() {
 
     window.addEventListener("deviceorientation", handleOrientationRef.current);
     window.addEventListener("devicemotion", handleMotionRef.current);
-  }, [stopSensors]);
+  }, [stopSensors, selectedMode, currentTurn, customName]);
+
+  useEffect(() => {
+    if (selectedMode !== "duo") return;
+    if (!isWaitingForDuo) return;
+    if (playerCount < 2) return;
+
+    // 비동기로 상태 업데이트하여 cascading render 방지
+    const timer = setTimeout(() => {
+      setIsWaitingForDuo(false);
+      setIsInGame(true);
+      startSensors();
+      emitRef.current.aimUpdate({ x: 0, y: 0 });
+    }, 0);
+
+    return () => clearTimeout(timer);
+  }, [playerCount, selectedMode, isWaitingForDuo, startSensors]);
+
+  useEffect(() => {
+    if (!customName || !currentTurn) return;
+    if (currentTurn === customName) {
+      // 비동기로 상태 업데이트하여 cascading render 방지
+      const timer = setTimeout(() => {
+        setHasFinishedTurn(false);
+      }, 0);
+      return () => clearTimeout(timer);
+    }
+  }, [currentTurn, customName]);
 
   useEffect(() => {
     return () => stopSensors();
@@ -299,8 +356,22 @@ export default function MobilePage() {
 
     setNameError("");
     setSelectedMode(mode);
+    setHasFinishedTurn(false);
+
+    // 모드 선택을 Display에 알림
+    emitSelectMode(mode);
+
+    if (mode === "duo" && playerCount < 2) {
+      setIsWaitingForDuo(true);
+      setIsInGame(false);
+      emitAimUpdate({ x: 0, y: 0 });
+      return;
+    }
+
+    setIsWaitingForDuo(false);
     setIsInGame(true);
     startSensors();
+    emitAimUpdate({ x: 0, y: 0 });
   };
 
   const otherPlayersCount = customName
@@ -309,6 +380,16 @@ export default function MobilePage() {
   const isSoloRunning = otherPlayerActive && otherPlayersCount === 1;
   const isSoloDisabled = !customName || playerCount > 1 || isSoloRunning;
   const isDuoDisabled = !customName || isSoloRunning;
+  const isMyTurn = currentTurn ? currentTurn === customName : true;
+  const turnMessage = isSoloRunning
+    ? "혼자하기가 진행 중입니다."
+    : selectedMode === "duo"
+    ? hasFinishedTurn
+      ? "결과를 기다려 주세요"
+      : isMyTurn
+      ? "내 차례입니다"
+      : "아직 차례가 아닙니다"
+    : "";
 
   return (
     <div
@@ -350,6 +431,11 @@ export default function MobilePage() {
             <div style={{ fontSize: "14px", opacity: 0.7, marginTop: "4px" }}>
               {selectedMode === "solo" ? "혼자하기" : "둘이서 하기"} 모드
             </div>
+            {turnMessage && (
+              <div style={{ fontSize: "12px", opacity: 0.7, marginTop: "6px" }}>
+                {turnMessage}
+              </div>
+            )}
           </div>
 
           {/* 자이로 조준 패드 */}
@@ -418,7 +504,10 @@ export default function MobilePage() {
             }}
           >
             {Array.from({ length: 3 }).map((_, index) => (
-              <span key={index} style={{ opacity: index < throwsLeft ? 1 : 0.2 }}>
+              <span
+                key={index}
+                style={{ opacity: index < throwsLeft ? 1 : 0.2 }}
+              >
                 O
               </span>
             ))}
@@ -477,6 +566,13 @@ export default function MobilePage() {
           >
             {selectedMode === "solo" ? "혼자하기" : "둘이서 하기"} 모드
           </div>
+          {isWaitingForDuo && (
+            <div
+              style={{ fontSize: "14px", opacity: 0.8, marginBottom: "8px" }}
+            >
+              플레이어 2를 기다리는 중...
+            </div>
+          )}
           <div style={{ fontSize: "16px", opacity: 0.8 }}>
             플레이어: {customName}
           </div>

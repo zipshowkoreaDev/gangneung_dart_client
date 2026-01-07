@@ -207,7 +207,79 @@ export function useDisplaySocket({
       }
     };
 
-    // 4. dart-thrown
+    // 4. select-mode
+    const onSelectMode = (data: {
+      room: string;
+      name: string;
+      mode: "solo" | "duo";
+    }) => {
+      if (data.room && data.room !== room) return;
+
+      onLog(`Player ${data.name} selected ${data.mode} mode`);
+
+      setPlayers((prev) => {
+        // 모드 설정
+        if (data.mode === "solo") {
+          // 혼자하기: 완전히 초기화하고 해당 플레이어만 등록
+          const next = new Map<string, PlayerScore>();
+          next.set(data.name, {
+            name: data.name,
+            score: 0,
+            isConnected: true,
+            isReady: false,
+            totalThrows: 0,
+            currentThrows: 0,
+          });
+
+          setIsSoloMode(true);
+          setPlayerOrder([data.name]);
+          setCurrentTurn(data.name);
+          setAimPositions(new Map());
+          setCountdown(null);
+          window.dispatchEvent(new CustomEvent("RESET_SCENE"));
+          socket.emit("turn-update", { room, currentTurn: data.name });
+          onLog(`Solo mode started: ${data.name}`);
+
+          return next;
+        } else {
+          // 둘이서: 기존 플레이어 유지
+          const next = new Map(prev);
+          const existing = prev.get(data.name);
+
+          if (existing) {
+            next.set(data.name, {
+              ...existing,
+              isConnected: true,
+            });
+          } else {
+            next.set(data.name, {
+              name: data.name,
+              score: 0,
+              isConnected: true,
+              isReady: false,
+              totalThrows: 0,
+              currentThrows: 0,
+            });
+            setPlayerOrder((order) =>
+              order.includes(data.name) ? order : [...order, data.name]
+            );
+          }
+
+          setIsSoloMode(false);
+          // duo 모드: 2명이 모두 입장하면 첫 번째 플레이어 턴으로 시작
+          if (next.size >= 2 && !currentTurnRef.current && playerOrderRef.current.length > 0) {
+            const firstPlayer = playerOrderRef.current[0];
+            setCurrentTurn(firstPlayer);
+            socket.emit("turn-update", { room, currentTurn: firstPlayer });
+            onLog(`Duo mode started: turn ${firstPlayer}`);
+          }
+
+          return next;
+        }
+      });
+    };
+
+    // 5. dart-thrown
     const onDartThrown = (data: {
       room: string;
       name: string;
@@ -257,7 +329,7 @@ export function useDisplaySocket({
       );
     };
 
-    // 5. aim-update
+    // 6. aim-update
     const onAimUpdate = (data: {
       room?: string;
       playerId?: string;
@@ -322,23 +394,12 @@ export function useDisplaySocket({
             return next;
           }
 
-          next.set(key, {
-            name: key,
-            score: 0,
-            isConnected: true,
-            isReady: true,
-            totalThrows: 0,
-            currentThrows: 0,
-          });
-          setPlayerOrder((order) =>
-            order.includes(key) ? order : [...order, key]
-          );
-          setIsSoloMode(next.size <= 1);
-          if (!currentTurnRef.current) {
-            setCurrentTurn(key);
-            socket.emit("turn-update", { room, currentTurn: key });
+          // aim-update로는 플레이어를 자동 등록하지 않음 (select-mode에서만 등록)
+          if (!prev.has(key)) {
+            shouldUpdateAim = false;
+            return prev;
           }
-          onLog(`Player auto-joined: ${key}`);
+
           return next;
         });
 
@@ -352,7 +413,7 @@ export function useDisplaySocket({
       }
     };
 
-    // 6. aim-off
+    // 7. aim-off
     const onAimOff = (data: {
       room?: string;
       playerId?: string;
@@ -428,7 +489,7 @@ export function useDisplaySocket({
       }
     };
 
-    // 7. game-result
+    // 8. game-result
     const onGameResult = (data: {
       results: {
         [socketId: string]: {
@@ -462,7 +523,7 @@ export function useDisplaySocket({
       window.dispatchEvent(new CustomEvent("GAME_RESULT", { detail: data }));
     };
 
-    // 8. game-finished
+    // 9. game-finished
     const onGameFinished = (data: {
       room: string;
       ranking: Array<{
@@ -485,6 +546,7 @@ export function useDisplaySocket({
     socket.on("clientInfo", onClientInfo);
     socket.on("joinedRoom", onJoinedRoom);
     socket.on("roomPlayerCount", onRoomPlayerCount);
+    socket.on("select-mode", onSelectMode);
     socket.on("dart-thrown", onDartThrown);
     socket.on("aim-update", onAimUpdate);
     socket.on("aim-off", onAimOff);
@@ -496,6 +558,7 @@ export function useDisplaySocket({
       socket.off("clientInfo", onClientInfo);
       socket.off("joinedRoom", onJoinedRoom);
       socket.off("roomPlayerCount", onRoomPlayerCount);
+      socket.off("select-mode", onSelectMode);
       socket.off("dart-thrown", onDartThrown);
       socket.off("aim-update", onAimUpdate);
       socket.off("aim-off", onAimOff);
