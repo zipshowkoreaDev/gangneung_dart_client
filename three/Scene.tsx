@@ -177,6 +177,15 @@ export default function Scene() {
   const [flyingDarts, setFlyingDarts] = useState<FlyingDartData[]>([]);
   const [stuckDarts, setStuckDarts] = useState<ThrownDart[]>([]);
 
+  useEffect(() => {
+    const handleReset = () => {
+      setFlyingDarts([]);
+      setStuckDarts([]);
+    };
+    window.addEventListener("RESET_SCENE", handleReset);
+    return () => window.removeEventListener("RESET_SCENE", handleReset);
+  }, []);
+
   const handleDartThrow = (position: [number, number, number]) => {
     const dartId = `${Date.now()}-${Math.random()}`;
 

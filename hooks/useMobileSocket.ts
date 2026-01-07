@@ -5,14 +5,20 @@ interface UseMobileSocketProps {
   room: string;
   customName: string;
   onPlayerCountChange?: (count: number) => void;
+  onOtherPlayerActive?: (active: boolean) => void;
 }
 
 export function useMobileSocket({
   room,
   customName,
   onPlayerCountChange,
+  onOtherPlayerActive,
 }: UseMobileSocketProps) {
   const throwCountRef = useRef(0);
+  const otherPlayerTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null
+  );
+  const OTHER_PLAYER_IDLE_MS = 60_000;
 
   useEffect(() => {
     if (!room || !customName) return;
@@ -40,16 +46,63 @@ export function useMobileSocket({
       // display 제외한 실제 플레이어 수 전달
       const actualPlayerCount = Math.max(0, data.playerCount - 1);
       onPlayerCountChange?.(actualPlayerCount);
+      if (actualPlayerCount === 0) {
+        if (otherPlayerTimeoutRef.current) {
+          clearTimeout(otherPlayerTimeoutRef.current);
+          otherPlayerTimeoutRef.current = null;
+        }
+        onOtherPlayerActive?.(false);
+      }
+    };
+
+    const markOtherPlayerActive = () => {
+      onOtherPlayerActive?.(true);
+      if (otherPlayerTimeoutRef.current) {
+        clearTimeout(otherPlayerTimeoutRef.current);
+      }
+      otherPlayerTimeoutRef.current = setTimeout(() => {
+        onOtherPlayerActive?.(false);
+      }, OTHER_PLAYER_IDLE_MS);
+    };
+
+    const handleAimUpdate = (data: {
+      room?: string;
+      name?: string;
+      aim?: { x: number; y: number };
+    }) => {
+      if (data.room && data.room !== room) return;
+      if (!data.name || data.name === customName || data.name === "_display") {
+        return;
+      }
+      markOtherPlayerActive();
+    };
+
+    const handleDartThrown = (data: { room?: string; name?: string }) => {
+      if (data.room && data.room !== room) return;
+      if (!data.name || data.name === customName || data.name === "_display") {
+        return;
+      }
+      markOtherPlayerActive();
     };
 
     socket.on("connect", handleConnect);
     socket.on("joinedRoom", handleJoinedRoom);
     socket.on("roomPlayerCount", handleRoomPlayerCount);
+    socket.on("aim-update", handleAimUpdate);
+    socket.on("dart-thrown", handleDartThrown);
 
     return () => {
       socket.off("connect", handleConnect);
       socket.off("joinedRoom", handleJoinedRoom);
       socket.off("roomPlayerCount", handleRoomPlayerCount);
+      socket.off("aim-update", handleAimUpdate);
+      socket.off("dart-thrown", handleDartThrown);
+
+      if (otherPlayerTimeoutRef.current) {
+        clearTimeout(otherPlayerTimeoutRef.current);
+        otherPlayerTimeoutRef.current = null;
+      }
+      onOtherPlayerActive?.(false);
 
       if (process.env.NODE_ENV === "production") {
         socket.disconnect();

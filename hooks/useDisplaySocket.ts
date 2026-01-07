@@ -71,6 +71,8 @@ export function useDisplaySocket({
   const playerOrderRef = useRef(playerOrder);
   const currentTurnRef = useRef<string | null>(currentTurn);
   const isSoloModeRef = useRef(isSoloMode);
+  const lastActivityRef = useRef<Map<string, number>>(new Map());
+  const soloTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     playersRef.current = players;
@@ -87,6 +89,47 @@ export function useDisplaySocket({
   useEffect(() => {
     isSoloModeRef.current = isSoloMode;
   }, [isSoloMode]);
+
+  const resetSoloRoom = useCallback(() => {
+    setAimPositions(new Map());
+    setPlayers(new Map());
+    setPlayerOrder([]);
+    setCurrentTurn(null);
+    setIsSoloMode(false);
+    setCountdown(null);
+    lastActivityRef.current = new Map();
+    window.dispatchEvent(new CustomEvent("RESET_SCENE"));
+    onLog("Solo room reset due to inactivity");
+  }, [
+    onLog,
+    setAimPositions,
+    setPlayers,
+    setPlayerOrder,
+    setCurrentTurn,
+    setIsSoloMode,
+    setCountdown,
+  ]);
+
+  const scheduleSoloInactivityCheck = useCallback(() => {
+    if (soloTimeoutRef.current) {
+      clearTimeout(soloTimeoutRef.current);
+    }
+
+    soloTimeoutRef.current = setTimeout(() => {
+      if (!isSoloModeRef.current) return;
+
+      const playersSnapshot = playersRef.current;
+      if (playersSnapshot.size !== 1) return;
+
+      const [playerName] = Array.from(playersSnapshot.keys());
+      const last = lastActivityRef.current.get(playerName);
+      if (!last) return;
+
+      if (Date.now() - last >= SOLO_INACTIVITY_MS) {
+        resetSoloRoom();
+      }
+    }, SOLO_INACTIVITY_MS);
+  }, [resetSoloRoom]);
 
   const emitFinishGame = useCallback(
     (nextPlayers: Map<string, PlayerScore>) => {
@@ -152,6 +195,16 @@ export function useDisplaySocket({
     const onRoomPlayerCount = (data: { room: string; playerCount: number }) => {
       const actualPlayerCount = Math.max(0, data.playerCount - 1);
       onLog(`Player count: ${actualPlayerCount}`);
+      if (isSoloModeRef.current && actualPlayerCount === 0) {
+        const playersSnapshot = playersRef.current;
+        if (playersSnapshot.size === 1) {
+          const [playerName] = Array.from(playersSnapshot.keys());
+          lastActivityRef.current.set(playerName, Date.now());
+          scheduleSoloInactivityCheck();
+          return;
+        }
+        resetSoloRoom();
+      }
     };
 
     // 4. dart-thrown
@@ -167,6 +220,9 @@ export function useDisplaySocket({
         onLog(`Ignored dart from unknown player ${data.name}`);
         return;
       }
+
+      lastActivityRef.current.set(data.name, Date.now());
+      scheduleSoloInactivityCheck();
 
       const score = getHitScore(data.aim);
       const hitSound = new Audio("/sound/hit.mp3");
@@ -225,9 +281,31 @@ export function useDisplaySocket({
       const y = clamp(data.aim?.y ?? 0, -1, 1);
 
       if (key && key !== "_display") {
+        lastActivityRef.current.set(key, Date.now());
+        scheduleSoloInactivityCheck();
+
         let shouldUpdateAim = true;
 
         setPlayers((prev) => {
+          if (isSoloModeRef.current && !prev.has(key) && prev.size >= 1) {
+            const next = new Map<string, PlayerScore>();
+            next.set(key, {
+              name: key,
+              score: 0,
+              isConnected: true,
+              isReady: true,
+              totalThrows: 0,
+              currentThrows: 0,
+            });
+            setPlayerOrder([key]);
+            setCurrentTurn(key);
+            setAimPositions(new Map());
+            window.dispatchEvent(new CustomEvent("RESET_SCENE"));
+            socket.emit("turn-update", { room, currentTurn: key });
+            onLog(`Solo replace: ${key}`);
+            return next;
+          }
+
           const next = new Map(prev);
           const existing = next.get(key);
 
@@ -292,6 +370,20 @@ export function useDisplaySocket({
 
       const playerName = data.name || resolvePlayerKey(data);
       if (playerName !== "_display") {
+        if (isSoloModeRef.current) {
+          lastActivityRef.current.set(playerName, Date.now());
+          setPlayers((prev) => {
+            const next = new Map(prev);
+            const player = prev.get(playerName);
+            if (player) {
+              next.set(playerName, { ...player, isReady: false });
+            }
+            return next;
+          });
+          scheduleSoloInactivityCheck();
+          return;
+        }
+
         let nextPlayers: Map<string, PlayerScore> | null = null;
 
         setPlayers((prev) => {
@@ -312,12 +404,12 @@ export function useDisplaySocket({
           (player) => player.isReady
         );
 
-        if (isSoloModeRef.current || !anyReady) {
-          emitFinishGame(playersSnapshot);
-          setCountdown(null);
-          setCurrentTurn(null);
-          return;
-        }
+      if (isSoloModeRef.current || !anyReady) {
+        emitFinishGame(playersSnapshot);
+        setCountdown(null);
+        setCurrentTurn(null);
+        return;
+      }
 
         const order =
           playerOrderRef.current.length > 0
@@ -409,6 +501,11 @@ export function useDisplaySocket({
       socket.off("aim-off", onAimOff);
       socket.off("game-result", onGameResult);
       socket.off("game-finished", onGameFinished);
+
+      if (soloTimeoutRef.current) {
+        clearTimeout(soloTimeoutRef.current);
+        soloTimeoutRef.current = null;
+      }
     };
   }, [
     room,
@@ -420,7 +517,10 @@ export function useDisplaySocket({
     setIsSoloMode,
     setCountdown,
     emitFinishGame,
+    resetSoloRoom,
+    scheduleSoloInactivityCheck,
   ]);
 
   return {};
 }
+const SOLO_INACTIVITY_MS = 60_000;

@@ -28,6 +28,8 @@ export default function MobilePage() {
   const [aimPosition, setAimPosition] = useState({ x: 0, y: 0 });
   const [sensorsReady, setSensorsReady] = useState(false);
   const [sensorError, setSensorError] = useState("");
+  const [otherPlayerActive, setOtherPlayerActive] = useState(false);
+  const [throwsLeft, setThrowsLeft] = useState(3);
 
   const emitRef = useRef<{
     aimUpdate: (aim: { x: number; y: number }, skin?: string) => void;
@@ -49,6 +51,7 @@ export default function MobilePage() {
     room: shouldConnect ? room : "",
     customName,
     onPlayerCountChange: setPlayerCount,
+    onOtherPlayerActive: setOtherPlayerActive,
   });
 
   useEffect(() => {
@@ -129,6 +132,7 @@ export default function MobilePage() {
 
     sensorsActiveRef.current = false;
     setSensorsReady(false);
+    setThrowsLeft(0);
     readyRef.current = true;
     throwCountRef.current = 0;
     baseGammaSumRef.current = 0;
@@ -155,6 +159,7 @@ export default function MobilePage() {
 
     sensorsActiveRef.current = true;
     setSensorsReady(true);
+    setThrowsLeft(3);
     readyRef.current = true;
     aimReadyRef.current = false;
     throwCountRef.current = 0;
@@ -251,6 +256,7 @@ export default function MobilePage() {
           score: 0,
         });
         throwCountRef.current += 1;
+        setThrowsLeft((prev) => Math.max(0, prev - 1));
         if (throwCountRef.current >= 3) {
           stopSensors();
           return;
@@ -297,7 +303,12 @@ export default function MobilePage() {
     startSensors();
   };
 
-  const isSoloDisabled = !customName || playerCount > 1;
+  const otherPlayersCount = customName
+    ? Math.max(0, playerCount - 1)
+    : playerCount;
+  const isSoloRunning = otherPlayerActive && otherPlayersCount === 1;
+  const isSoloDisabled = !customName || playerCount > 1 || isSoloRunning;
+  const isDuoDisabled = !customName || isSoloRunning;
 
   return (
     <div
@@ -397,6 +408,21 @@ export default function MobilePage() {
           >
             X: {aimPosition.x.toFixed(2)}, Y: {aimPosition.y.toFixed(2)}
           </div>
+          <div
+            style={{
+              marginTop: "8px",
+              color: "white",
+              fontSize: "14px",
+              opacity: 0.8,
+              letterSpacing: "6px",
+            }}
+          >
+            {Array.from({ length: 3 }).map((_, index) => (
+              <span key={index} style={{ opacity: index < throwsLeft ? 1 : 0.2 }}>
+                O
+              </span>
+            ))}
+          </div>
 
           {!sensorsReady && (
             <button
@@ -491,17 +517,21 @@ export default function MobilePage() {
               }}
               placeholder="이름 입력 (최대 5글자)"
               maxLength={5}
+              disabled={isSoloRunning}
               style={{
                 padding: "16px",
                 fontSize: "18px",
                 fontWeight: "600",
                 borderRadius: "12px",
                 border: "2px solid rgba(255, 255, 255, 0.3)",
-                background: "rgba(255, 255, 255, 0.1)",
+                background: isSoloRunning
+                  ? "rgba(255, 255, 255, 0.05)"
+                  : "rgba(255, 255, 255, 0.1)",
                 color: "white",
                 textAlign: "center",
                 outline: "none",
                 backdropFilter: "blur(10px)",
+                opacity: isSoloRunning ? 0.6 : 1,
               }}
             />
 
@@ -516,6 +546,18 @@ export default function MobilePage() {
               >
                 현재 방 인원: {playerCount}명
                 {playerCount > 1 && " (혼자하기 불가)"}
+              </div>
+            )}
+            {isSoloRunning && (
+              <div
+                style={{
+                  fontSize: "12px",
+                  color: "#ffdddd",
+                  textAlign: "center",
+                  opacity: 0.8,
+                }}
+              >
+                혼자하기가 진행 중입니다.
               </div>
             )}
             {nameError && (
@@ -572,22 +614,22 @@ export default function MobilePage() {
 
             <button
               onClick={() => handleModeSelect("duo")}
-              disabled={!customName}
+              disabled={isDuoDisabled}
               style={{
                 padding: "20px 40px",
                 fontSize: "24px",
                 fontWeight: "bold",
                 borderRadius: "16px",
                 border: "none",
-                background: !customName
+                background: isDuoDisabled
                   ? "#888"
                   : "linear-gradient(135deg, #4CAF50 0%, #45a049 100%)",
                 color: "white",
-                cursor: !customName ? "not-allowed" : "pointer",
+                cursor: isDuoDisabled ? "not-allowed" : "pointer",
                 boxShadow: !customName
                   ? "none"
                   : "0 8px 32px rgba(76, 175, 80, 0.4)",
-                opacity: !customName ? 0.5 : 1,
+                opacity: isDuoDisabled ? 0.5 : 1,
                 transition: "all 0.3s ease",
               }}
             >
@@ -599,5 +641,3 @@ export default function MobilePage() {
     </div>
   );
 }
-
-
