@@ -4,6 +4,7 @@ import { socket } from "@/shared/socket";
 interface UseMobileSocketProps {
   room: string;
   customName: string;
+  selectedMode?: "solo" | "duo" | null;
   onPlayerCountChange?: (count: number) => void;
   onOtherPlayerActive?: (active: boolean) => void;
   onTurnUpdate?: (currentTurn: string | null) => void;
@@ -12,6 +13,7 @@ interface UseMobileSocketProps {
 export function useMobileSocket({
   room,
   customName,
+  selectedMode,
   onPlayerCountChange,
   onOtherPlayerActive,
   onTurnUpdate,
@@ -20,20 +22,97 @@ export function useMobileSocket({
   const otherPlayerTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
     null
   );
+  const hasJoinedRef = useRef(false);
+  const currentRoomRef = useRef<string>("");
+  const currentNameRef = useRef<string>("");
+  const selectedModeRef = useRef<"solo" | "duo" | null>(null);
   const OTHER_PLAYER_IDLE_MS = 60_000;
+
+  useEffect(() => {
+    selectedModeRef.current = selectedMode ?? null;
+  }, [selectedMode]);
+
+  useEffect(() => {
+    if (!selectedMode || !room || !customName) return;
+    if (!socket.connected || !hasJoinedRef.current) return;
+    socket.emit("select-mode", {
+      room,
+      name: customName,
+      mode: selectedMode,
+    });
+  }, [selectedMode, room, customName]);
 
   useEffect(() => {
     if (!room || !customName) return;
 
-    socket.connect();
+    // room이나 customName이 변경되었는지 확인
+    const roomChanged = currentRoomRef.current !== room;
+    const nameChanged = currentNameRef.current !== customName;
+
+    // 같은 room, name으로 이미 참가했으면 중복 참가 방지
+    if (
+      hasJoinedRef.current &&
+      !roomChanged &&
+      !nameChanged
+    ) {
+      return;
+    }
+
+    // room이나 name이 변경되었으면 disconnect 후 재연결
+    if ((roomChanged || nameChanged) && socket.connected) {
+      socket.disconnect();
+      hasJoinedRef.current = false;
+    }
+
+    // 이미 연결되어 있지 않으면 연결
+    if (!socket.connected) {
+      socket.connect();
+    }
 
     const handleConnect = () => {
+      // 중복 참가 방지
+      if (hasJoinedRef.current && currentRoomRef.current === room && currentNameRef.current === customName) {
+        return;
+      }
+
       // 연결되면 바로 방에 참가
       socket.emit("joinRoom", {
         room,
         name: customName,
       });
+      hasJoinedRef.current = true;
+      currentRoomRef.current = room;
+      currentNameRef.current = customName;
+
+      const pendingMode = selectedModeRef.current;
+      if (pendingMode) {
+        socket.emit("select-mode", {
+          room,
+          name: customName,
+          mode: pendingMode,
+        });
+      }
     };
+
+    // 이미 연결되어 있으면 바로 joinRoom
+    if (socket.connected && !hasJoinedRef.current) {
+      socket.emit("joinRoom", {
+        room,
+        name: customName,
+      });
+      hasJoinedRef.current = true;
+      currentRoomRef.current = room;
+      currentNameRef.current = customName;
+
+      const pendingMode = selectedModeRef.current;
+      if (pendingMode) {
+        socket.emit("select-mode", {
+          room,
+          name: customName,
+          mode: pendingMode,
+        });
+      }
+    }
 
     const handleJoinedRoom = (data: { room: string; playerCount: number }) => {
       // joinedRoom에서도 플레이어 수 업데이트 (display 제외)
@@ -133,11 +212,20 @@ export function useMobileSocket({
       }
       onOtherPlayerActive?.(false);
 
-      if (process.env.NODE_ENV === "production") {
-        socket.disconnect();
-      }
+      // hasJoinedRef는 유지하여 React Strict Mode에서 중복 참가 방지
+      // disconnect는 하지 않음 (컴포넌트 언마운트 시에만 disconnect)
     };
   }, [room, customName, onPlayerCountChange, onOtherPlayerActive, onTurnUpdate]);
+
+  // 컴포넌트 언마운트 시 disconnect
+  useEffect(() => {
+    return () => {
+      socket.disconnect();
+      hasJoinedRef.current = false;
+      currentRoomRef.current = "";
+      currentNameRef.current = "";
+    };
+  }, []);
 
   const emitAimUpdate = useCallback(
     (aim: { x: number; y: number }, skin?: string) => {

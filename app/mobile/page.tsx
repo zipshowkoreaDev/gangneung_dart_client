@@ -68,6 +68,7 @@ export default function MobilePage() {
   const { emitAimUpdate, emitAimOff, emitThrowDart, emitSelectMode } = useMobileSocket({
     room: shouldConnect ? room : "",
     customName,
+    selectedMode,
     onPlayerCountChange: handlePlayerCountChange,
     onOtherPlayerActive: handleOtherPlayerActive,
     onTurnUpdate: handleTurnUpdate,
@@ -202,6 +203,14 @@ export default function MobilePage() {
     const betaRange = isIOS ? 20 : 35;
 
     handleOrientationRef.current = (e: DeviceOrientationEvent) => {
+      if (
+        selectedMode === "duo" &&
+        currentTurn &&
+        currentTurn !== customName
+      ) {
+        return;
+      }
+
       const gamma = e.gamma ?? 0;
       const beta = e.beta ?? 0;
 
@@ -307,10 +316,12 @@ export default function MobilePage() {
     window.addEventListener("devicemotion", handleMotionRef.current);
   }, [stopSensors, selectedMode, currentTurn, customName]);
 
+  const roomPlayerCount = playerCount;
+
   useEffect(() => {
     if (selectedMode !== "duo") return;
     if (!isWaitingForDuo) return;
-    if (playerCount < 2) return;
+    if (roomPlayerCount !== 2) return;
 
     // 비동기로 상태 업데이트하여 cascading render 방지
     const timer = setTimeout(() => {
@@ -321,7 +332,7 @@ export default function MobilePage() {
     }, 0);
 
     return () => clearTimeout(timer);
-  }, [playerCount, selectedMode, isWaitingForDuo, startSensors]);
+  }, [roomPlayerCount, selectedMode, isWaitingForDuo, startSensors]);
 
   useEffect(() => {
     if (!customName || !currentTurn) return;
@@ -338,14 +349,36 @@ export default function MobilePage() {
     return () => stopSensors();
   }, [stopSensors]);
 
+  const otherPlayersCount = customName
+    ? Math.max(0, playerCount - 1)
+    : playerCount;
+  const isDuoReady = roomPlayerCount === 2;
+  const isRoomFull = roomPlayerCount > 2;
+  const isSoloRunning =
+    otherPlayerActive && otherPlayersCount === 1 && !isDuoReady;
+  const isSoloDisabled =
+    !customName || playerCount > 1 || isSoloRunning || isRoomFull;
+  const isDuoDisabled =
+    !customName || isSoloRunning || !isDuoReady || isRoomFull;
+
   const handleModeSelect = async (mode: "solo" | "duo") => {
     if (!customName) {
       setNameError("이름을 입력하면 시작할 수 있어요");
       return;
     }
 
+    if (isRoomFull) {
+      setNameError("지금은 플레이 중이라 이용할 수 없습니다");
+      return;
+    }
+
     if (mode === "solo" && playerCount > 1) {
       setNameError("다른 플레이어가 있어 혼자하기를 할 수 없습니다");
+      return;
+    }
+
+    if (mode === "duo" && roomPlayerCount !== 2) {
+      setNameError("둘이서 모드는 방 인원이 2명일 때만 가능합니다");
       return;
     }
 
@@ -361,7 +394,7 @@ export default function MobilePage() {
     // 모드 선택을 Display에 알림
     emitSelectMode(mode);
 
-    if (mode === "duo" && playerCount < 2) {
+    if (mode === "duo" && roomPlayerCount !== 2) {
       setIsWaitingForDuo(true);
       setIsInGame(false);
       emitAimUpdate({ x: 0, y: 0 });
@@ -374,12 +407,6 @@ export default function MobilePage() {
     emitAimUpdate({ x: 0, y: 0 });
   };
 
-  const otherPlayersCount = customName
-    ? Math.max(0, playerCount - 1)
-    : playerCount;
-  const isSoloRunning = otherPlayerActive && otherPlayersCount === 1;
-  const isSoloDisabled = !customName || playerCount > 1 || isSoloRunning;
-  const isDuoDisabled = !customName || isSoloRunning;
   const isMyTurn = currentTurn ? currentTurn === customName : true;
   const turnMessage = isSoloRunning
     ? "혼자하기가 진행 중입니다."
@@ -654,6 +681,18 @@ export default function MobilePage() {
                 }}
               >
                 혼자하기가 진행 중입니다.
+              </div>
+            )}
+            {isRoomFull && (
+              <div
+                style={{
+                  fontSize: "12px",
+                  color: "#ffdddd",
+                  textAlign: "center",
+                  opacity: 0.8,
+                }}
+              >
+                지금은 플레이 중이라 이용할 수 없습니다
               </div>
             )}
             {nameError && (

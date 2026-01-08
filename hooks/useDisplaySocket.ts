@@ -20,7 +20,7 @@ type PlayerScore = {
 
 interface UseDisplaySocketProps {
   room: string;
-  onLog: (msg: string) => void;
+  onLog?: (msg: string) => void;
   setAimPositions: Dispatch<SetStateAction<AimState>>;
   setPlayers: Dispatch<SetStateAction<Map<string, PlayerScore>>>;
   setCurrentTurn: Dispatch<SetStateAction<string | null>>;
@@ -31,6 +31,7 @@ interface UseDisplaySocketProps {
   playerOrder: string[];
   currentTurn: string | null;
   isSoloMode: boolean;
+  countdown: number | null;
 }
 
 function clamp(n: number, min: number, max: number) {
@@ -66,11 +67,13 @@ export function useDisplaySocket({
   playerOrder,
   currentTurn,
   isSoloMode,
+  countdown,
 }: UseDisplaySocketProps) {
   const playersRef = useRef(players);
   const playerOrderRef = useRef(playerOrder);
   const currentTurnRef = useRef<string | null>(currentTurn);
   const isSoloModeRef = useRef(isSoloMode);
+  const countdownRef = useRef<number | null>(countdown);
   const lastActivityRef = useRef<Map<string, number>>(new Map());
   const soloTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -90,6 +93,10 @@ export function useDisplaySocket({
     isSoloModeRef.current = isSoloMode;
   }, [isSoloMode]);
 
+  useEffect(() => {
+    countdownRef.current = countdown;
+  }, [countdown]);
+
   const resetSoloRoom = useCallback(() => {
     setAimPositions(new Map());
     setPlayers(new Map());
@@ -99,7 +106,7 @@ export function useDisplaySocket({
     setCountdown(null);
     lastActivityRef.current = new Map();
     window.dispatchEvent(new CustomEvent("RESET_SCENE"));
-    onLog("Solo room reset due to inactivity");
+    onLog?.("Solo room reset due to inactivity");
   }, [
     onLog,
     setAimPositions,
@@ -171,7 +178,7 @@ export function useDisplaySocket({
     }
 
     const onConnect = () => {
-      onLog(`Socket connected: ${socket.id}`);
+      onLog?.(`Socket connected: ${socket.id}`);
       // Display도 방에 참가
       socket.emit("joinRoom", { room, name: "_display" });
     };
@@ -182,27 +189,20 @@ export function useDisplaySocket({
       name: string;
       room: string;
     }) => {
-      onLog(`Client info: ${data.socketId}, ${data.name}, ${data.room}`);
+      onLog?.(`Client info: ${data.socketId}, ${data.name}, ${data.room}`);
     };
 
     // 2. joinedRoom
     const onJoinedRoom = (data: { room: string; playerCount: number }) => {
       const actualPlayerCount = Math.max(0, data.playerCount - 1);
-      onLog(`Room joined: ${data.room}, Players: ${actualPlayerCount}`);
+      onLog?.(`Room joined: ${data.room}, Players: ${actualPlayerCount}`);
     };
 
     // 3. roomPlayerCount
     const onRoomPlayerCount = (data: { room: string; playerCount: number }) => {
       const actualPlayerCount = Math.max(0, data.playerCount - 1);
-      onLog(`Player count: ${actualPlayerCount}`);
+      onLog?.(`Player count: ${actualPlayerCount}`);
       if (isSoloModeRef.current && actualPlayerCount === 0) {
-        const playersSnapshot = playersRef.current;
-        if (playersSnapshot.size === 1) {
-          const [playerName] = Array.from(playersSnapshot.keys());
-          lastActivityRef.current.set(playerName, Date.now());
-          scheduleSoloInactivityCheck();
-          return;
-        }
         resetSoloRoom();
       }
     };
@@ -215,68 +215,67 @@ export function useDisplaySocket({
     }) => {
       if (data.room && data.room !== room) return;
 
-      onLog(`Player ${data.name} selected ${data.mode} mode`);
+      onLog?.(`Player ${data.name} selected ${data.mode} mode`);
 
-      setPlayers((prev) => {
-        // 모드 설정
-        if (data.mode === "solo") {
-          // 혼자하기: 완전히 초기화하고 해당 플레이어만 등록
-          const next = new Map<string, PlayerScore>();
-          next.set(data.name, {
-            name: data.name,
-            score: 0,
-            isConnected: true,
-            isReady: false,
-            totalThrows: 0,
-            currentThrows: 0,
+      if (data.mode === "solo") {
+        // 혼자하기: 완전히 초기화하고 해당 플레이어만 등록
+        const next = new Map<string, PlayerScore>();
+        next.set(data.name, {
+          name: data.name,
+          score: 0,
+          isConnected: true,
+          isReady: false,
+          totalThrows: 0,
+          currentThrows: 0,
+        });
+
+        setPlayers(next);
+        setIsSoloMode(true);
+        setPlayerOrder([data.name]);
+        setCurrentTurn(null);
+        setAimPositions(new Map());
+        setCountdown(null);
+        window.dispatchEvent(new CustomEvent("RESET_SCENE"));
+        onLog?.(`Solo mode selected: ${data.name}`);
+      } else {
+        // 둘이서: 기존 solo 모드 플레이어가 있으면 초기화
+        const wasSoloMode = isSoloModeRef.current;
+        const next = new Map<string, PlayerScore>();
+
+        // 현재 플레이어만 등록
+        next.set(data.name, {
+          name: data.name,
+          score: 0,
+          isConnected: true,
+          isReady: false,
+          totalThrows: 0,
+          currentThrows: 0,
+        });
+
+        // 기존 duo 모드 플레이어가 있고, 다른 사람이면 유지
+        if (!wasSoloMode) {
+          const currentPlayers = playersRef.current;
+          currentPlayers.forEach((player, playerName) => {
+            if (playerName !== data.name) {
+              next.set(playerName, player);
+            }
           });
-
-          setIsSoloMode(true);
-          setPlayerOrder([data.name]);
-          setCurrentTurn(data.name);
-          setAimPositions(new Map());
-          setCountdown(null);
-          window.dispatchEvent(new CustomEvent("RESET_SCENE"));
-          socket.emit("turn-update", { room, currentTurn: data.name });
-          onLog(`Solo mode started: ${data.name}`);
-
-          return next;
-        } else {
-          // 둘이서: 기존 플레이어 유지
-          const next = new Map(prev);
-          const existing = prev.get(data.name);
-
-          if (existing) {
-            next.set(data.name, {
-              ...existing,
-              isConnected: true,
-            });
-          } else {
-            next.set(data.name, {
-              name: data.name,
-              score: 0,
-              isConnected: true,
-              isReady: false,
-              totalThrows: 0,
-              currentThrows: 0,
-            });
-            setPlayerOrder((order) =>
-              order.includes(data.name) ? order : [...order, data.name]
-            );
-          }
-
-          setIsSoloMode(false);
-          // duo 모드: 2명이 모두 입장하면 첫 번째 플레이어 턴으로 시작
-          if (next.size >= 2 && !currentTurnRef.current && playerOrderRef.current.length > 0) {
-            const firstPlayer = playerOrderRef.current[0];
-            setCurrentTurn(firstPlayer);
-            socket.emit("turn-update", { room, currentTurn: firstPlayer });
-            onLog(`Duo mode started: turn ${firstPlayer}`);
-          }
-
-          return next;
         }
-      });
+
+        setPlayers(next);
+        setPlayerOrder(Array.from(next.keys()));
+        setIsSoloMode(false);
+        setCountdown(null);
+        setCurrentTurn(null);
+
+        if (wasSoloMode) {
+          // Solo에서 Duo로 전환
+          setAimPositions(new Map());
+          window.dispatchEvent(new CustomEvent("RESET_SCENE"));
+        }
+
+        onLog?.(`Duo mode: ${data.name} joined (${next.size} players)`);
+      }
     };
 
     // 5. dart-thrown
@@ -289,7 +288,7 @@ export function useDisplaySocket({
       if (data.room && data.room !== room) return;
 
       if (!playersRef.current.has(data.name)) {
-        onLog(`Ignored dart from unknown player ${data.name}`);
+        onLog?.(`Ignored dart from unknown player ${data.name}`);
         return;
       }
 
@@ -314,7 +313,7 @@ export function useDisplaySocket({
             totalThrows: player.totalThrows + 1,
             currentThrows: isLastThrow ? 0 : newCurrentThrows,
           });
-          onLog(
+          onLog?.(
             `Score: ${data.name} ${player.score} -> ${
               player.score + score
             } (Throw ${newCurrentThrows}/3)`
@@ -346,7 +345,7 @@ export function useDisplaySocket({
         Array.from(playersRef.current.values()).some((player) => player.isReady);
 
       if (isSoloRunning && key && !playersRef.current.has(key)) {
-        onLog(`Solo running: ignore new player ${key}`);
+        onLog?.(`Solo running: ignore new player ${key}`);
         return;
       }
       const x = clamp(data.aim?.x ?? 0, -1, 1);
@@ -357,6 +356,7 @@ export function useDisplaySocket({
         scheduleSoloInactivityCheck();
 
         let shouldUpdateAim = true;
+        let addedPlayer = false;
 
         setPlayers((prev) => {
           if (isSoloModeRef.current && !prev.has(key) && prev.size >= 1) {
@@ -370,11 +370,11 @@ export function useDisplaySocket({
               currentThrows: 0,
             });
             setPlayerOrder([key]);
-            setCurrentTurn(key);
+            setCurrentTurn(null); // 카운트다운 후 시작
+            setCountdown(5); // 5초 카운트다운 시작
             setAimPositions(new Map());
             window.dispatchEvent(new CustomEvent("RESET_SCENE"));
-            socket.emit("turn-update", { room, currentTurn: key });
-            onLog(`Solo replace: ${key}`);
+            onLog?.(`Solo replace: ${key}, starting countdown from 5`);
             return next;
           }
 
@@ -394,14 +394,28 @@ export function useDisplaySocket({
             return next;
           }
 
-          // aim-update로는 플레이어를 자동 등록하지 않음 (select-mode에서만 등록)
           if (!prev.has(key)) {
-            shouldUpdateAim = false;
-            return prev;
+            next.set(key, {
+              name: key,
+              score: 0,
+              isConnected: true,
+              isReady: true,
+              totalThrows: 0,
+              currentThrows: 0,
+            });
+            addedPlayer = true;
+            return next;
           }
 
           return next;
         });
+
+        if (addedPlayer) {
+          setPlayerOrder((prev) => {
+            if (prev.includes(key)) return prev;
+            return [...prev, key];
+          });
+        }
 
         if (shouldUpdateAim) {
           setAimPositions((prev) => {
@@ -409,6 +423,29 @@ export function useDisplaySocket({
             next.set(key, { x, y, skin: data.skin });
             return next;
           });
+
+          // 카운트다운 시작 체크 (이미 시작되지 않았고 턴도 시작되지 않았을 때만)
+          if (countdownRef.current === null && currentTurnRef.current === null) {
+            const playersSnapshot = playersRef.current;
+            const readyPlayers = Array.from(playersSnapshot.values()).filter(
+              (player) => player.isReady
+            );
+
+            // Solo 모드: 1명이 ready가 되면 카운트다운 시작
+            if (isSoloModeRef.current && readyPlayers.length === 1) {
+              setCountdown(5);
+              onLog?.("Solo mode: Starting countdown from 5");
+            }
+            // Duo 모드: 2명 모두 ready가 되면 카운트다운 시작
+            else if (
+              !isSoloModeRef.current &&
+              playersSnapshot.size >= 2 &&
+              readyPlayers.length >= 2
+            ) {
+              setCountdown(5);
+              onLog?.("Duo mode: Both players ready, starting countdown from 5");
+            }
+          }
         }
       }
     };
@@ -432,16 +469,7 @@ export function useDisplaySocket({
       const playerName = data.name || resolvePlayerKey(data);
       if (playerName !== "_display") {
         if (isSoloModeRef.current) {
-          lastActivityRef.current.set(playerName, Date.now());
-          setPlayers((prev) => {
-            const next = new Map(prev);
-            const player = prev.get(playerName);
-            if (player) {
-              next.set(playerName, { ...player, isReady: false });
-            }
-            return next;
-          });
-          scheduleSoloInactivityCheck();
+          resetSoloRoom();
           return;
         }
 
@@ -453,7 +481,7 @@ export function useDisplaySocket({
 
           if (player) {
             next.set(playerName, { ...player, isReady: false });
-            onLog(`Aim off: ${playerName}`);
+            onLog?.(`Aim off: ${playerName}`);
           }
 
           nextPlayers = next;
@@ -511,11 +539,11 @@ export function useDisplaySocket({
         rank: number;
       }>;
     }) => {
-      onLog(`Game result received`);
-      onLog(`Total players: ${data.ranking.length}`);
+      onLog?.(`Game result received`);
+      onLog?.(`Total players: ${data.ranking.length}`);
 
       data.ranking.forEach((player) => {
-        onLog(
+        onLog?.(
           `Rank ${player.rank}: ${player.name} - ${player.score}점 (socketId: ${player.socketId})`
         );
       });
@@ -532,11 +560,11 @@ export function useDisplaySocket({
         rank: number;
       }>;
     }) => {
-      onLog(`Game finished in room: ${data.room}`);
-      onLog(`Final ranking:`);
+      onLog?.(`Game finished in room: ${data.room}`);
+      onLog?.(`Final ranking:`);
 
       data.ranking.forEach((player) => {
-        onLog(`  ${player.rank}위: ${player.name} - ${player.score}점`);
+        onLog?.(`  ${player.rank}위: ${player.name} - ${player.score}점`);
       });
 
       window.dispatchEvent(new CustomEvent("GAME_FINISHED", { detail: data }));

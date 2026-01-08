@@ -10,24 +10,22 @@ type PlayerScore = {
 };
 
 type ScoreboardProps = {
-  isMounted: boolean;
   players: Map<string, PlayerScore>;
   currentTurn: string | null;
   isSoloMode: boolean;
 };
 
 export default function Scoreboard({
-  isMounted,
   players,
   currentTurn,
   isSoloMode,
 }: ScoreboardProps) {
-  if (!isMounted) return null;
 
   const playerList = Array.from(players.values());
   const playerOne = playerList[0];
   const playerTwo = playerList[1];
-  const slots = isSoloMode ? [playerOne] : [playerOne, playerTwo];
+  const isSoloDisplay = isSoloMode || playerList.length <= 1;
+  const slots = isSoloDisplay ? [playerOne] : [playerOne, playerTwo];
 
   const renderPlayerCard = (
     player: PlayerScore | undefined,
@@ -89,10 +87,16 @@ export default function Scoreboard({
   };
 
   return (
-    <div className="fixed top-0 left-0 w-full bg-white/50 backdrop-blur-md flex gap-5 p-5 z-10">
-      {slots.map((player, index) =>
-        renderPlayerCard(player, isSoloMode && index === 0, !isSoloMode)
-      )}
+    <div className="absolute top-0 left-0 w-full bg-white/20 backdrop-blur-md flex gap-5 p-5 z-10 shadow-md">
+      {slots.map((player, index) => (
+        <div key={player?.name || `slot-${index}`} className="flex-1">
+          {renderPlayerCard(
+            player,
+            isSoloMode && index === 0,
+            !isSoloDisplay
+          )}
+        </div>
+      ))}
     </div>
   );
 }
