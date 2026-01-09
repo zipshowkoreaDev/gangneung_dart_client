@@ -28,6 +28,17 @@ export function useMobileSocket({
   const selectedModeRef = useRef<"solo" | "duo" | null>(null);
   const OTHER_PLAYER_IDLE_MS = 60_000;
 
+  // 콜백을 ref에 저장하여 최신 값 유지 (dependency에서 제거 가능)
+  const onPlayerCountChangeRef = useRef(onPlayerCountChange);
+  const onOtherPlayerActiveRef = useRef(onOtherPlayerActive);
+  const onTurnUpdateRef = useRef(onTurnUpdate);
+
+  useEffect(() => {
+    onPlayerCountChangeRef.current = onPlayerCountChange;
+    onOtherPlayerActiveRef.current = onOtherPlayerActive;
+    onTurnUpdateRef.current = onTurnUpdate;
+  }, [onPlayerCountChange, onOtherPlayerActive, onTurnUpdate]);
+
   useEffect(() => {
     selectedModeRef.current = selectedMode ?? null;
   }, [selectedMode]);
@@ -117,7 +128,7 @@ export function useMobileSocket({
     const handleJoinedRoom = (data: { room: string; playerCount: number }) => {
       // joinedRoom에서도 플레이어 수 업데이트 (display 제외)
       const actualPlayerCount = Math.max(0, data.playerCount - 1);
-      onPlayerCountChange?.(actualPlayerCount);
+      onPlayerCountChangeRef.current?.(actualPlayerCount);
     };
 
     const handleRoomPlayerCount = (data: {
@@ -126,23 +137,23 @@ export function useMobileSocket({
     }) => {
       // display 제외한 실제 플레이어 수 전달
       const actualPlayerCount = Math.max(0, data.playerCount - 1);
-      onPlayerCountChange?.(actualPlayerCount);
+      onPlayerCountChangeRef.current?.(actualPlayerCount);
       if (actualPlayerCount === 0) {
         if (otherPlayerTimeoutRef.current) {
           clearTimeout(otherPlayerTimeoutRef.current);
           otherPlayerTimeoutRef.current = null;
         }
-        onOtherPlayerActive?.(false);
+        onOtherPlayerActiveRef.current?.(false);
       }
     };
 
     const markOtherPlayerActive = () => {
-      onOtherPlayerActive?.(true);
+      onOtherPlayerActiveRef.current?.(true);
       if (otherPlayerTimeoutRef.current) {
         clearTimeout(otherPlayerTimeoutRef.current);
       }
       otherPlayerTimeoutRef.current = setTimeout(() => {
-        onOtherPlayerActive?.(false);
+        onOtherPlayerActiveRef.current?.(false);
       }, OTHER_PLAYER_IDLE_MS);
     };
 
@@ -171,7 +182,7 @@ export function useMobileSocket({
       currentTurn?: string | null;
     }) => {
       if (data.room && data.room !== room) return;
-      onTurnUpdate?.(data.currentTurn ?? null);
+      onTurnUpdateRef.current?.(data.currentTurn ?? null);
     };
 
     const handleSelectMode = (data: {
@@ -210,12 +221,12 @@ export function useMobileSocket({
         clearTimeout(otherPlayerTimeoutRef.current);
         otherPlayerTimeoutRef.current = null;
       }
-      onOtherPlayerActive?.(false);
+      onOtherPlayerActiveRef.current?.(false);
 
       // hasJoinedRef는 유지하여 React Strict Mode에서 중복 참가 방지
       // disconnect는 하지 않음 (컴포넌트 언마운트 시에만 disconnect)
     };
-  }, [room, customName, onPlayerCountChange, onOtherPlayerActive, onTurnUpdate]);
+  }, [room, customName]);
 
   // 컴포넌트 언마운트 시 disconnect
   useEffect(() => {
