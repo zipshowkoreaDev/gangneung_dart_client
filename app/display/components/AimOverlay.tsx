@@ -10,7 +10,6 @@ type AimOverlayProps = {
   aimPositions: Map<string, AimPosition>;
   playerOrder: string[];
   players: Map<string, { isReady: boolean }>;
-  isSoloMode: boolean;
 };
 
 function resolveColor(playerKey: string, playerOrder: string[]) {
@@ -23,21 +22,13 @@ export default function AimOverlay({
   aimPositions,
   playerOrder,
   players,
-  isSoloMode,
 }: AimOverlayProps) {
+
   return (
     <>
       {Array.from(aimPositions.entries())
         .filter(([playerKey]) => {
-          // 혼자하기 모드일 때는 현재 플레이어의 조준점만 표시
-          if (isSoloMode && playerOrder.length > 0) {
-            return playerKey === playerOrder[0];
-          }
-          // 2인 모드일 때는 준비 완료된 플레이어만 조준점 표시
-          const player = players.get(playerKey);
-          if (!isSoloMode && player && !player.isReady) {
-            return false;
-          }
+          // 모든 플레이어의 조준점 표시
           return true;
         })
         .map(([playerKey, pos]) => {

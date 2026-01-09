@@ -5,9 +5,7 @@ import { Canvas } from "@react-three/fiber";
 import { QRCodeSVG } from "qrcode.react";
 
 import Scene from "@/three/Scene";
-import { socket } from "@/shared/socket";
 import { useDisplaySocket } from "@/hooks/useDisplaySocket";
-import { useCountdown } from "@/hooks/useCountdown";
 import Scoreboard, { PlayerScore } from "@/app/display/components/Scoreboard";
 import AimOverlay from "@/app/display/components/AimOverlay";
 
@@ -22,8 +20,6 @@ export default function DisplayPage() {
   );
   const [currentTurn, setCurrentTurn] = useState<string | null>(null);
   const [playerOrder, setPlayerOrder] = useState<string[]>([]);
-  const [isSoloMode, setIsSoloMode] = useState(false);
-  const [countdown, setCountdown] = useState<number | null>(null);
 
   useDisplaySocket({
     room,
@@ -31,22 +27,9 @@ export default function DisplayPage() {
     setPlayers,
     setCurrentTurn,
     setPlayerOrder,
-    setIsSoloMode,
-    setCountdown,
     players,
     playerOrder,
     currentTurn,
-    isSoloMode,
-    countdown,
-  });
-
-  useCountdown({
-    countdown,
-    setCountdown,
-    playerOrder,
-    room,
-    setCurrentTurn,
-    socket,
   });
 
   const mobileUrl = useMemo(() => {
@@ -67,20 +50,7 @@ export default function DisplayPage() {
     <div className="w-screen h-screen flex items-center justify-center bg-black overflow-hidden">
       <div className="relative w-full h-full aspect-9/16 max-w-[56.25vh] overflow-hidden bg-[url(/04_roulette_BG.webp)] bg-cover bg-center bg-no-repeat">
         {/* Scoreboard */}
-        <Scoreboard
-          players={players}
-          currentTurn={currentTurn}
-          isSoloMode={isSoloMode}
-        />
-
-        {/* Countdown */}
-        {countdown !== null && (
-          <div className="absolute top-0 left-0 w-full h-full flex items-center justify-center z-50 bg-black/80 backdrop-blur-sm">
-            <div className="text-[12rem] font-bold text-[#FFD700] text-shadow-[0_0_40px_rgba(255_215_0_0.8)] animate-pulse">
-              {countdown}
-            </div>
-          </div>
-        )}
+        <Scoreboard players={players} currentTurn={currentTurn} />
 
         {/* QR */}
         {mobileUrl && (
@@ -94,7 +64,6 @@ export default function DisplayPage() {
           aimPositions={aimPositions}
           playerOrder={playerOrder}
           players={players}
-          isSoloMode={isSoloMode}
         />
 
         {/* R3F */}

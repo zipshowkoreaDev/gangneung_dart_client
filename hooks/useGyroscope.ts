@@ -9,18 +9,15 @@ const AIM_INTERVAL = 1000 / AIM_HZ;
 const BASELINE_SAMPLES = 12;
 
 interface UseGyroscopeProps {
-  selectedMode: "solo" | "duo" | null;
-  currentTurn: string | null;
-  customName: string;
   emitAimUpdate: (aim: { x: number; y: number }, skin?: string) => void;
   emitAimOff: () => void;
-  emitThrowDart: (payload: { aim: { x: number; y: number }; score: number }) => void;
+  emitThrowDart: (payload: {
+    aim: { x: number; y: number };
+    score: number;
+  }) => void;
 }
 
 export function useGyroscope({
-  selectedMode,
-  currentTurn,
-  customName,
   emitAimUpdate,
   emitAimOff,
   emitThrowDart,
@@ -151,14 +148,6 @@ export function useGyroscope({
     const betaRange = isIOS ? 20 : 35;
 
     handleOrientationRef.current = (e: DeviceOrientationEvent) => {
-      if (
-        selectedMode === "duo" &&
-        currentTurn &&
-        currentTurn !== customName
-      ) {
-        return;
-      }
-
       const gamma = e.gamma ?? 0;
       const beta = e.beta ?? 0;
 
@@ -226,14 +215,6 @@ export function useGyroscope({
         magAdj > MAG_THRESH &&
         jerk > JERK_THRESH
       ) {
-        if (
-          selectedMode === "duo" &&
-          currentTurn &&
-          currentTurn !== customName
-        ) {
-          return;
-        }
-
         readyRef.current = false;
         throwBlockedUntilRef.current = now + THROW_COOLDOWN_MS;
 
@@ -262,7 +243,7 @@ export function useGyroscope({
 
     window.addEventListener("deviceorientation", handleOrientationRef.current);
     window.addEventListener("devicemotion", handleMotionRef.current);
-  }, [stopSensors, selectedMode, currentTurn, customName, emitAimUpdate, emitThrowDart]);
+  }, [stopSensors, emitAimUpdate, emitThrowDart]);
 
   return {
     aimPosition,

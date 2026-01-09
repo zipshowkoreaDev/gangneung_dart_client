@@ -12,34 +12,18 @@ type PlayerScore = {
 type ScoreboardProps = {
   players: Map<string, PlayerScore>;
   currentTurn: string | null;
-  isSoloMode: boolean;
 };
 
 export default function Scoreboard({
   players,
   currentTurn,
-  isSoloMode,
 }: ScoreboardProps) {
-
   const playerList = Array.from(players.values());
   const playerOne = playerList[0];
   const playerTwo = playerList[1];
-  const isSoloDisplay = isSoloMode || playerList.length <= 1;
-  const slots = isSoloDisplay ? [playerOne] : [playerOne, playerTwo];
+  const slots = [playerOne, playerTwo];
 
-  const renderPlayerCard = (
-    player: PlayerScore | undefined,
-    showSoloBadge: boolean,
-    showStatus: boolean
-  ) => {
-    if (!player) {
-      return (
-        <div className="flex-1 flex items-center justify-center bg-white/5 p-5 rounded-lg text-base opacity-60">
-          플레이어를 기다리는 중...
-        </div>
-      );
-    }
-
+  const renderPlayerCard = (player: PlayerScore | undefined) => {
     return (
       <div
         className="flex-1 flex flex-col items-center justify-center gap-2 p-5 rounded-lg transition-all"
@@ -63,25 +47,11 @@ export default function Scoreboard({
           )}
         </div>
         <div className="text-[2rem] font-bold text-[#FFD700]">
-          {player?.score}점
+          {player?.score ? `${player?.score} 점` : ""}
         </div>
         <div className="text-[0.75rem] opacity-70">
-          {player?.totalThrows}회 던짐
-          {showStatus && (
-            <>
-              {player?.isConnected
-                ? player?.isReady
-                  ? "준비 완료"
-                  : "대기 중"
-                : "나감"}
-            </>
-          )}
+          {player?.totalThrows ? `${player?.totalThrows}회 던짐` : ""}
         </div>
-        {showSoloBadge && (
-          <div className="text-[0.75rem] text-[#FFD700] mt-2">
-            혼자하기 모드
-          </div>
-        )}
       </div>
     );
   };
@@ -89,12 +59,11 @@ export default function Scoreboard({
   return (
     <div className="absolute top-0 left-0 w-full bg-white/20 backdrop-blur-md flex gap-5 p-5 z-10 shadow-md">
       {slots.map((player, index) => (
-        <div key={player?.name || `slot-${index}`} className="flex-1">
-          {renderPlayerCard(
-            player,
-            isSoloMode && index === 0,
-            !isSoloDisplay
-          )}
+        <div
+          key={player?.name || `slot-${index}`}
+          className="flex-1 bg-white/40 rounded-lg"
+        >
+          {renderPlayerCard(player)}
         </div>
       ))}
     </div>
