@@ -2,35 +2,36 @@
 
 import { useState, useCallback } from "react";
 import { QRCodeSVG } from "qrcode.react";
-import { generateAuthUrl, getBaseUrl } from "@/lib/url";
+import { generateAuthUrl } from "@/lib/url";
 
 const FIXED_ROOM = "zipshow";
 
 // QR 코드 생성 관리자 페이지
 // 현장 체험용 QR 코드를 생성하고 관리
 export default function AdminQRPage() {
-  const [baseUrl] = useState(() => getBaseUrl());
-
+  // lazy initialization으로 클라이언트에서만 QR 생성
   const [currentQR, setCurrentQR] = useState<{
     url: string;
     createdAt: number;
   } | null>(() => {
     if (typeof window === "undefined") return null;
 
+    const url = generateAuthUrl(FIXED_ROOM);
+    console.log("Admin QR URL:", url); // 디버깅
     return {
-      url: generateAuthUrl(FIXED_ROOM),
+      url,
       createdAt: Date.now(),
     };
   });
 
   const generateQRCode = useCallback(() => {
-    if (!baseUrl) return;
-
+    const url = generateAuthUrl(FIXED_ROOM);
+    console.log("Regenerated QR URL:", url); // 디버깅
     setCurrentQR({
-      url: generateAuthUrl(FIXED_ROOM),
+      url,
       createdAt: Date.now(),
     });
-  }, [baseUrl]);
+  }, []);
 
   const copyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text);

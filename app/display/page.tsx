@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { useDisplaySocket } from "@/hooks/useDisplaySocket";
 import { generateAuthUrl } from "@/lib/url";
 import Scoreboard, { PlayerScore } from "./components/Scoreboard";
@@ -18,6 +18,15 @@ export default function DisplayPage() {
   const [currentTurn, setCurrentTurn] = useState<string | null>(null);
   const [playerOrder, setPlayerOrder] = useState<string[]>([]);
 
+  // lazy initialization으로 클라이언트에서만 QR URL 생성
+  const [authUrl] = useState(() => {
+    if (typeof window === "undefined") return "";
+
+    const url = generateAuthUrl(ROOM);
+    console.log("Display QR URL:", url); // 디버깅
+    return url;
+  });
+
   useDisplaySocket({
     room: ROOM,
     setAimPositions,
@@ -28,8 +37,6 @@ export default function DisplayPage() {
     playerOrder,
     currentTurn,
   });
-
-  const authUrl = useMemo(() => generateAuthUrl(ROOM), []);
 
   return (
     <div className="w-screen h-screen flex items-center justify-center bg-black overflow-hidden">
