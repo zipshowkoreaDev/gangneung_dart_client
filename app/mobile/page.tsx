@@ -11,20 +11,24 @@ import NameInput from "./components/NameInput";
 import GameScreen from "./components/GameScreen";
 
 export default function MobilePage() {
-  const [sessionValid, setSessionValid] = useState<boolean | null>(null);
+  const [sessionValid] = useState<boolean | null>(() =>
+    getQRSession() !== null ? true : false
+  );
   const [room] = useState(getRoomFromUrl);
   const [customName, setCustomName] = useState("");
   const [isInGame, setIsInGame] = useState(false);
   const [hasJoined, setHasJoined] = useState(false);
-
-  useEffect(() => {
-    setSessionValid(getQRSession() !== null);
-  }, []);
+  const [assignedSlot, setAssignedSlot] = useState<1 | 2 | null>(null);
 
   const { emitAimUpdate, emitAimOff, emitThrowDart } = useMobileSocket({
     room,
     name: customName,
     enabled: hasJoined,
+    slot: assignedSlot,
+    onSlotAssigned: (slot) => {
+      setAssignedSlot(slot);
+      console.log(`Assigned to slot ${slot}`);
+    },
   });
 
   const {
@@ -46,10 +50,19 @@ export default function MobilePage() {
     return () => stopSensors();
   }, [stopSensors]);
 
+  const ensureMotionPermission = useCallback(async () => {
+    try {
+      return await requestMotionPermission();
+    } catch (error) {
+      console.error("Motion permission failed", error);
+      return false;
+    }
+  }, [requestMotionPermission]);
+
   const handleStart = async () => {
     setHasFinishedTurn(false);
 
-    const hasPermission = await requestMotionPermission();
+    const hasPermission = await ensureMotionPermission();
     if (!hasPermission) return;
 
     setHasJoined(true);
@@ -58,16 +71,16 @@ export default function MobilePage() {
   };
 
   const handleRequestPermission = useCallback(async () => {
-    const ok = await requestMotionPermission();
+    const ok = await ensureMotionPermission();
     if (ok) startSensors();
-  }, [requestMotionPermission, startSensors]);
+  }, [ensureMotionPermission, startSensors]);
 
   return (
     <div className="h-screen flex flex-col items-center justify-center gap-8 bg-gradient-to-br from-[#1e3c72] to-[#2a5298] px-5">
       {sessionValid === null && <SessionValidating />}
       {sessionValid === false && <AccessDenied />}
-      {sessionValid === true && (
-        isInGame ? (
+      {sessionValid === true &&
+        (isInGame ? (
           <GameScreen
             aimPosition={aimPosition}
             throwsLeft={throwsLeft}
@@ -81,8 +94,7 @@ export default function MobilePage() {
             onNameChange={setCustomName}
             onStart={handleStart}
           />
-        )
-      )}
+        ))}
     </div>
   );
 }

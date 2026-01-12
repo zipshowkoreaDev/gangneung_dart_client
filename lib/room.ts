@@ -1,9 +1,99 @@
 const DEFAULT_ROOM = "zipshow";
+const MAX_PLAYERS = 2;
 
-//  URL 파라미터에서 room 값 가져오기
 export function getRoomFromUrl(): string {
   if (typeof window === "undefined") return DEFAULT_ROOM;
 
   const params = new URLSearchParams(window.location.search);
   return params.get("room") || DEFAULT_ROOM;
+}
+
+export function getSlotFromUrl(): 1 | 2 | null {
+  if (typeof window === "undefined") return null;
+
+  const params = new URLSearchParams(window.location.search);
+  const slot = params.get("slot");
+
+  if (slot === "1") return 1;
+  if (slot === "2") return 2;
+  return null;
+}
+
+export function getPlayerRoom(baseRoom: string, playerSlot: 1 | 2): string {
+  return `game-${baseRoom}-player${playerSlot}`;
+}
+
+export function getDisplayRoom(baseRoom: string): string {
+  return `game-${baseRoom}-display`;
+}
+
+export function getAllPlayerRooms(baseRoom: string): string[] {
+  return Array.from({ length: MAX_PLAYERS }, (_, i) =>
+    getPlayerRoom(baseRoom, (i + 1) as 1 | 2)
+  );
+}
+
+export function extractPlayerSlot(roomName: string): 1 | 2 | null {
+  const match = roomName.match(/^game-[^-]+-player([12])$/);
+  return match ? (parseInt(match[1]) as 1 | 2) : null;
+}
+
+export function isPlayerRoom(roomName: string): boolean {
+  return /^game-[^-]+-player[12]$/.test(roomName);
+}
+
+export function isDisplayRoom(roomName: string): boolean {
+  return /^game-[^-]+-display$/.test(roomName);
+}
+
+function getOccupiedSlots(room: string): Set<1 | 2> {
+  if (typeof window === "undefined") return new Set();
+
+  const key = `slots_${room}`;
+  const stored = localStorage.getItem(key);
+  if (!stored) return new Set();
+
+  try {
+    const parsed = JSON.parse(stored);
+    return new Set(parsed.slots || []);
+  } catch {
+    return new Set();
+  }
+}
+
+function saveOccupiedSlots(room: string, slots: Set<1 | 2>): void {
+  if (typeof window === "undefined") return;
+
+  const key = `slots_${room}`;
+  localStorage.setItem(
+    key,
+    JSON.stringify({
+      slots: Array.from(slots),
+      updatedAt: Date.now(),
+    })
+  );
+}
+
+export function assignEmptySlot(room: string): 1 | 2 | null {
+  const occupied = getOccupiedSlots(room);
+
+  if (!occupied.has(1)) {
+    occupied.add(1);
+    saveOccupiedSlots(room, occupied);
+    return 1;
+  }
+
+  if (!occupied.has(2)) {
+    occupied.add(2);
+    saveOccupiedSlots(room, occupied);
+    return 2;
+  }
+
+  return null;
+}
+
+export function releaseSlot(room: string, slot: 1 | 2): void {
+  const occupied = getOccupiedSlots(room);
+  occupied.delete(slot);
+  saveOccupiedSlots(room, occupied);
 }

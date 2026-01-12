@@ -6,6 +6,7 @@ import {
   useCallback,
 } from "react";
 import { socket } from "@/shared/socket";
+import { getDisplayRoom, getAllPlayerRooms } from "@/lib/room";
 
 type AimState = Map<string, { x: number; y: number; skin?: string }>;
 
@@ -79,15 +80,19 @@ export function useDisplaySocket({
 
   const emitFinishGame = useCallback(
     (nextPlayers: Map<string, PlayerScore>) => {
+      const playerRooms = getAllPlayerRooms(room);
       const scores = Array.from(nextPlayers.values()).map((player) => ({
         socketId: player.name,
         name: player.name,
         score: player.score,
       }));
 
-      socket.emit("finish-game", {
-        room,
-        scores,
+      // 모든 playerRoom에 게임 종료 전송
+      playerRooms.forEach((playerRoom) => {
+        socket.emit("finish-game", {
+          room: playerRoom,
+          scores,
+        });
       });
     },
     [room]
@@ -112,13 +117,34 @@ export function useDisplaySocket({
   useEffect(() => {
     if (!room) return;
 
+    const displayRoom = getDisplayRoom(room);
+    const playerRooms = getAllPlayerRooms(room);
+    const playerRoomSet = new Set(playerRooms);
+    const isPlayerRoomEvent = (roomName?: string) =>
+      !roomName || playerRoomSet.has(roomName);
+
+    const logPlayerCount = (
+      label: string,
+      data: { room: string; playerCount: number }
+    ) => {
+      const actualPlayerCount = Math.max(0, data.playerCount - 1);
+      onLog?.(`${label}: ${data.room}, Players: ${actualPlayerCount}`);
+    };
+
     if (!socket.connected) {
       socket.connect();
     }
 
     const onConnect = () => {
       onLog?.(`Socket connected: ${socket.id}`);
-      socket.emit("joinRoom", { room, name: "_display" });
+
+      socket.emit("joinRoom", { room: displayRoom, name: "_display" });
+      onLog?.(`Joined display room: ${displayRoom}`);
+
+      playerRooms.forEach((playerRoom) => {
+        socket.emit("joinRoom", { room: playerRoom, name: "_display" });
+        onLog?.(`Subscribed to player room: ${playerRoom}`);
+      });
     };
 
     const onClientInfo = (data: {
@@ -130,13 +156,11 @@ export function useDisplaySocket({
     };
 
     const onJoinedRoom = (data: { room: string; playerCount: number }) => {
-      const actualPlayerCount = Math.max(0, data.playerCount - 1);
-      onLog?.(`Room joined: ${data.room}, Players: ${actualPlayerCount}`);
+      logPlayerCount("Room joined", data);
     };
 
     const onRoomPlayerCount = (data: { room: string; playerCount: number }) => {
-      const actualPlayerCount = Math.max(0, data.playerCount - 1);
-      onLog?.(`Player count: ${actualPlayerCount}`);
+      logPlayerCount("Player count", data);
     };
 
     const onDartThrown = (data: {
@@ -145,7 +169,7 @@ export function useDisplaySocket({
       aim: { x: number; y: number };
       score: number;
     }) => {
-      if (data.room && data.room !== room) return;
+      if (!isPlayerRoomEvent(data.room)) return;
 
       if (!playersRef.current.has(data.name)) {
         onLog?.(`Ignored dart from unknown player ${data.name}`);
@@ -193,7 +217,7 @@ export function useDisplaySocket({
       skin?: string;
       aim: { x: number; y: number };
     }) => {
-      if (data.room && data.room !== room) return;
+      if (!isPlayerRoomEvent(data.room)) return;
 
       const key = resolvePlayerKey(data);
       const x = clamp(data.aim?.x ?? 0, -1, 1);
@@ -259,7 +283,7 @@ export function useDisplaySocket({
       name?: string;
       socketId?: string;
     }) => {
-      if (data.room && data.room !== room) return;
+      if (!isPlayerRoomEvent(data.room)) return;
 
       const key = resolvePlayerKey(data);
       setAimPositions((prev) => {
@@ -268,17 +292,16 @@ export function useDisplaySocket({
         return next;
       });
 
-      const playerName = data.name || resolvePlayerKey(data);
-      if (playerName !== "_display") {
+      if (key !== "_display") {
         let nextPlayers: Map<string, PlayerScore> | null = null;
 
         setPlayers((prev) => {
           const next = new Map(prev);
-          const player = prev.get(playerName);
+          const player = prev.get(key);
 
           if (player) {
-            next.set(playerName, { ...player, isReady: false });
-            onLog?.(`Aim off: ${playerName}`);
+            next.set(key, { ...player, isReady: false });
+            onLog?.(`Aim off: ${key}`);
           }
 
           nextPlayers = next;
@@ -302,13 +325,12 @@ export function useDisplaySocket({
             : Array.from(playersSnapshot.keys());
         const nextTurn = findNextReadyPlayer(
           order,
-          currentTurnRef.current || playerName,
+          currentTurnRef.current || key,
           playersSnapshot
         );
 
         if (nextTurn) {
           setCurrentTurn(nextTurn);
-          socket.emit("turn-update", { room, currentTurn: nextTurn });
         }
       }
     };

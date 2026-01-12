@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useDisplaySocket } from "@/hooks/useDisplaySocket";
-import { generateAuthUrl } from "@/lib/url";
+import { generateSessionToken } from "@/lib/session";
 import Scoreboard, { PlayerScore } from "./components/Scoreboard";
 import AimOverlay from "./components/AimOverlay";
 import DisplayQRCode from "./components/DisplayQRCode";
@@ -14,16 +14,19 @@ const ROOM = "zipshow";
 
 export default function DisplayPage() {
   const [aimPositions, setAimPositions] = useState<AimState>(() => new Map());
-  const [players, setPlayers] = useState<Map<string, PlayerScore>>(() => new Map());
+  const [players, setPlayers] = useState<Map<string, PlayerScore>>(
+    () => new Map()
+  );
   const [currentTurn, setCurrentTurn] = useState<string | null>(null);
   const [playerOrder, setPlayerOrder] = useState<string[]>([]);
 
-  // lazy initialization으로 클라이언트에서만 QR URL 생성
-  const [authUrl] = useState(() => {
+  const [mobileUrl] = useState(() => {
     if (typeof window === "undefined") return "";
 
-    const url = generateAuthUrl(ROOM);
-    console.log("Display QR URL:", url); // 디버깅
+    const baseUrl = `${window.location.protocol}//${window.location.host}`;
+    const token = generateSessionToken();
+    const url = `${baseUrl}/auth/${token}?room=${ROOM}`;
+    console.log("Display QR URL:", url);
     return url;
   });
 
@@ -42,8 +45,12 @@ export default function DisplayPage() {
     <div className="w-screen h-screen flex items-center justify-center bg-black overflow-hidden">
       <div className="relative w-full h-full aspect-9/16 max-w-[56.25vh] overflow-hidden bg-[url(/04_roulette_BG.webp)] bg-cover bg-center bg-no-repeat">
         <Scoreboard players={players} currentTurn={currentTurn} />
-        <DisplayQRCode url={authUrl} />
-        <AimOverlay aimPositions={aimPositions} playerOrder={playerOrder} players={players} />
+        <DisplayQRCode url={mobileUrl} />
+        <AimOverlay
+          aimPositions={aimPositions}
+          playerOrder={playerOrder}
+          players={players}
+        />
         <DartCanvas />
       </div>
     </div>
