@@ -11,12 +11,10 @@ type PlayerScore = {
 
 type ScoreboardProps = {
   players: Map<string, PlayerScore>;
-  currentTurn: string | null;
 };
 
 export default function Scoreboard({
   players,
-  currentTurn,
 }: ScoreboardProps) {
   const playerList = Array.from(players.values());
   const playerOne = playerList[0];
@@ -27,24 +25,10 @@ export default function Scoreboard({
     return (
       <div
         className="flex-1 flex flex-col items-center justify-center gap-2 p-5 rounded-lg transition-all"
-        style={{
-          background:
-            currentTurn === player?.name
-              ? "rgba(76, 175, 80, 0.3)"
-              : "rgba(255, 255, 255, 0.05)",
-          border:
-            currentTurn === player?.name
-              ? "3px solid #4CAF50"
-              : "3px solid transparent",
-        }}
+        style={{ background: "rgba(255, 255, 255, 0.05)" }}
       >
         <div className="flex items-center gap-2">
           <span className="text-[1.5rem] font-bold">{player?.name}</span>
-          {currentTurn === player?.name && (
-            <span className="text-[1rem] bg-[#4CAF50] text-white px-2 py-1 rounded-md font-semibold">
-              턴 ({player?.currentThrows}/3)
-            </span>
-          )}
         </div>
         <div className="text-[2rem] font-bold text-[#FFD700]">
           {player?.score ? `${player?.score} 점` : ""}

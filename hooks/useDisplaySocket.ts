@@ -24,11 +24,10 @@ interface UseDisplaySocketProps {
   onLog?: (msg: string) => void;
   setAimPositions: Dispatch<SetStateAction<AimState>>;
   setPlayers: Dispatch<SetStateAction<Map<string, PlayerScore>>>;
-  setCurrentTurn: Dispatch<SetStateAction<string | null>>;
   setPlayerOrder: Dispatch<SetStateAction<string[]>>;
+  setPlayerRoomCounts: Dispatch<SetStateAction<Map<string, number>>>;
   players: Map<string, PlayerScore>;
   playerOrder: string[];
-  currentTurn: string | null;
 }
 
 function clamp(n: number, min: number, max: number) {
@@ -56,15 +55,13 @@ export function useDisplaySocket({
   onLog,
   setAimPositions,
   setPlayers,
-  setCurrentTurn,
   setPlayerOrder,
+  setPlayerRoomCounts,
   players,
   playerOrder,
-  currentTurn,
 }: UseDisplaySocketProps) {
   const playersRef = useRef(players);
   const playerOrderRef = useRef(playerOrder);
-  const currentTurnRef = useRef<string | null>(currentTurn);
 
   useEffect(() => {
     playersRef.current = players;
@@ -74,45 +71,21 @@ export function useDisplaySocket({
     playerOrderRef.current = playerOrder;
   }, [playerOrder]);
 
-  useEffect(() => {
-    currentTurnRef.current = currentTurn;
-  }, [currentTurn]);
-
   const emitFinishGame = useCallback(
-    (nextPlayers: Map<string, PlayerScore>) => {
-      const playerRooms = getAllPlayerRooms(room);
-      const scores = Array.from(nextPlayers.values()).map((player) => ({
-        socketId: player.name,
-        name: player.name,
-        score: player.score,
-      }));
-
-      // 모든 playerRoom에 게임 종료 전송
-      playerRooms.forEach((playerRoom) => {
-        socket.emit("finish-game", {
-          room: playerRoom,
-          scores,
-        });
+    (targetRoom: string, player: PlayerScore) => {
+      socket.emit("finish-game", {
+        room: targetRoom,
+        scores: [
+          {
+            socketId: player.name,
+            name: player.name,
+            score: player.score,
+          },
+        ],
       });
     },
-    [room]
+    []
   );
-
-  const findNextReadyPlayer = (
-    order: string[],
-    current: string | null,
-    nextPlayers: Map<string, PlayerScore>
-  ) => {
-    if (order.length === 0) return null;
-    const startIndex = current ? order.indexOf(current) : -1;
-    for (let i = 1; i <= order.length; i += 1) {
-      const candidate = order[(startIndex + i) % order.length];
-      if (nextPlayers.get(candidate)?.isReady) {
-        return candidate;
-      }
-    }
-    return null;
-  };
 
   useEffect(() => {
     if (!room) return;
@@ -161,6 +134,14 @@ export function useDisplaySocket({
 
     const onRoomPlayerCount = (data: { room: string; playerCount: number }) => {
       logPlayerCount("Player count", data);
+      if (!data.room || !playerRoomSet.has(data.room)) return;
+
+      const actualPlayerCount = Math.max(0, data.playerCount - 1);
+      setPlayerRoomCounts((prev) => {
+        const next = new Map(prev);
+        next.set(data.room, actualPlayerCount);
+        return next;
+      });
     };
 
     const onDartThrown = (data: {
@@ -293,44 +274,25 @@ export function useDisplaySocket({
       });
 
       if (key !== "_display") {
-        let nextPlayers: Map<string, PlayerScore> | null = null;
+        let finishedPlayer: PlayerScore | null = null;
 
         setPlayers((prev) => {
           const next = new Map(prev);
           const player = prev.get(key);
 
           if (player) {
-            next.set(key, { ...player, isReady: false });
+            finishedPlayer = player;
+            next.delete(key);
             onLog?.(`Aim off: ${key}`);
           }
 
-          nextPlayers = next;
           return next;
         });
 
-        const playersSnapshot = nextPlayers || playersRef.current;
-        const anyReady = Array.from(playersSnapshot.values()).some(
-          (player) => player.isReady
-        );
+        setPlayerOrder((prev) => prev.filter((name) => name !== key));
 
-        if (!anyReady) {
-          emitFinishGame(playersSnapshot);
-          setCurrentTurn(null);
-          return;
-        }
-
-        const order =
-          playerOrderRef.current.length > 0
-            ? playerOrderRef.current
-            : Array.from(playersSnapshot.keys());
-        const nextTurn = findNextReadyPlayer(
-          order,
-          currentTurnRef.current || key,
-          playersSnapshot
-        );
-
-        if (nextTurn) {
-          setCurrentTurn(nextTurn);
+        if (data.room && finishedPlayer) {
+          emitFinishGame(data.room, finishedPlayer);
         }
       }
     };
@@ -412,7 +374,6 @@ export function useDisplaySocket({
     onLog,
     setAimPositions,
     setPlayers,
-    setCurrentTurn,
     setPlayerOrder,
     emitFinishGame,
   ]);

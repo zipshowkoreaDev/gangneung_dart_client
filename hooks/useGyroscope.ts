@@ -7,6 +7,7 @@ const THROW_COOLDOWN_MS = 700;
 const AIM_HZ = 30;
 const AIM_INTERVAL = 1000 / AIM_HZ;
 const BASELINE_SAMPLES = 12;
+const HIT_RADIUS = 0.6;
 
 interface UseGyroscopeProps {
   emitAimUpdate: (aim: { x: number; y: number }, skin?: string) => void;
@@ -15,6 +16,16 @@ interface UseGyroscopeProps {
     aim: { x: number; y: number };
     score: number;
   }) => void;
+}
+
+function clamp(n: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, n));
+}
+
+function getHitScore(aim: { x: number; y: number }) {
+  const x = clamp(aim.x, -1, 1);
+  const y = clamp(aim.y, -1, 1);
+  return Math.hypot(x, y) <= HIT_RADIUS ? 1 : 0;
 }
 
 export function useGyroscope({
@@ -27,6 +38,7 @@ export function useGyroscope({
   const [sensorError, setSensorError] = useState("");
   const [throwsLeft, setThrowsLeft] = useState(3);
   const [hasFinishedTurn, setHasFinishedTurn] = useState(false);
+  const [myScore, setMyScore] = useState(0);
 
   const sensorsActiveRef = useRef(false);
   const lastAimSentRef = useRef(0);
@@ -127,6 +139,7 @@ export function useGyroscope({
     setSensorsReady(true);
     setHasFinishedTurn(false);
     setThrowsLeft(3);
+    setMyScore(0);
     readyRef.current = true;
     aimReadyRef.current = false;
     throwCountRef.current = 0;
@@ -218,9 +231,12 @@ export function useGyroscope({
         readyRef.current = false;
         throwBlockedUntilRef.current = now + THROW_COOLDOWN_MS;
 
+        const hitScore = getHitScore(aimRef.current);
+        setMyScore((prev) => prev + hitScore);
+
         emitThrowDart({
           aim: aimRef.current,
-          score: 0,
+          score: hitScore,
         });
         throwCountRef.current += 1;
         setThrowsLeft((prev) => Math.max(0, prev - 1));
@@ -251,6 +267,7 @@ export function useGyroscope({
     sensorError,
     throwsLeft,
     hasFinishedTurn,
+    myScore,
     startSensors,
     stopSensors,
     requestMotionPermission,
