@@ -46,6 +46,8 @@ export function isDisplayRoom(roomName: string): boolean {
   return /^game-[^-]+-display$/.test(roomName);
 }
 
+const SLOT_EXPIRY_MS = 60 * 1000; // 1분 후 슬롯 만료
+
 function getOccupiedSlots(room: string): Set<1 | 2> {
   if (typeof window === "undefined") return new Set();
 
@@ -55,6 +57,14 @@ function getOccupiedSlots(room: string): Set<1 | 2> {
 
   try {
     const parsed = JSON.parse(stored);
+    const now = Date.now();
+
+    // 만료된 슬롯 데이터는 무시
+    if (parsed.updatedAt && now - parsed.updatedAt > SLOT_EXPIRY_MS) {
+      localStorage.removeItem(key);
+      return new Set();
+    }
+
     return new Set(parsed.slots || []);
   } catch {
     return new Set();
@@ -96,4 +106,17 @@ export function releaseSlot(room: string, slot: 1 | 2): void {
   const occupied = getOccupiedSlots(room);
   occupied.delete(slot);
   saveOccupiedSlots(room, occupied);
+}
+
+export function refreshSlot(room: string, slot: 1 | 2): void {
+  const occupied = getOccupiedSlots(room);
+  if (occupied.has(slot)) {
+    saveOccupiedSlots(room, occupied);
+  }
+}
+
+export function clearAllSlots(room: string): void {
+  if (typeof window === "undefined") return;
+  const key = `slots_${room}`;
+  localStorage.removeItem(key);
 }

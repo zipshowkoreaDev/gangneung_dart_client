@@ -1,19 +1,13 @@
 import { useEffect, useCallback, useRef, useState } from "react";
 import { socket } from "@/shared/socket";
-import {
-  getPlayerRoom,
-  getSlotFromUrl,
-  assignEmptySlot,
-  releaseSlot,
-} from "@/lib/room";
+import { getPlayerRoom } from "@/lib/room";
+import { debugLog } from "@/app/mobile/components/DebugOverlay";
 
 interface UseMobileSocketProps {
   room: string;
   name: string;
   enabled: boolean;
-  slot?: 1 | 2 | null;
-  onPlayerCountChange?: (count: number) => void;
-  onSlotAssigned?: (slot: 1 | 2) => void;
+  slot: 1 | 2 | null;
   onGameResult?: (data: GameResultPayload) => void;
 }
 
@@ -43,54 +37,33 @@ export function useMobileSocket({
   room,
   name,
   enabled,
-  slot: providedSlot,
-  onPlayerCountChange,
-  onSlotAssigned,
+  slot,
   onGameResult,
 }: UseMobileSocketProps) {
   const [isConnected, setIsConnected] = useState(false);
   const throwCountRef = useRef(0);
   const hasJoinedRef = useRef(false);
   const currentRoomRef = useRef<string>("");
-  const assignedSlotRef = useRef<1 | 2 | null>(null);
+  const slotRef = useRef<1 | 2 | null>(null);
 
-  const onPlayerCountChangeRef = useRef(onPlayerCountChange);
-  const onSlotAssignedRef = useRef(onSlotAssigned);
   const onGameResultRef = useRef(onGameResult);
-
   useEffect(() => {
-    onPlayerCountChangeRef.current = onPlayerCountChange;
-    onSlotAssignedRef.current = onSlotAssigned;
     onGameResultRef.current = onGameResult;
-  }, [onPlayerCountChange, onSlotAssigned, onGameResult]);
+  }, [onGameResult]);
 
+  // slot이 할당되면 저장
   useEffect(() => {
-    if (!room || !enabled) return;
+    slotRef.current = slot;
+  }, [slot]);
 
-    let slot = getSlotFromUrl() || providedSlot;
-
-    if (!slot) {
-      slot = assignEmptySlot(room);
-      if (!slot) {
-        console.error("No available slot (room full)");
-        return;
-      }
-      console.log(`Auto-assigned to slot ${slot}`);
-      onSlotAssignedRef.current?.(slot);
-    }
-
-    assignedSlotRef.current = slot;
+  // enabled && slot이 있을 때 joinRoom
+  useEffect(() => {
+    if (!room || !enabled || !slot) return;
 
     const playerRoom = getPlayerRoom(room, slot);
-    const roomChanged = currentRoomRef.current !== playerRoom;
 
-    if (hasJoinedRef.current && !roomChanged) {
+    if (hasJoinedRef.current && currentRoomRef.current === playerRoom) {
       return;
-    }
-
-    if (roomChanged && socket.connected) {
-      socket.disconnect();
-      hasJoinedRef.current = false;
     }
 
     if (!socket.connected) {
@@ -99,44 +72,35 @@ export function useMobileSocket({
 
     const joinPlayerRoom = () => {
       if (hasJoinedRef.current && currentRoomRef.current === playerRoom) return;
+      debugLog(`[Socket] joinRoom: ${playerRoom}, name: ${name}`);
       socket.emit("joinRoom", { room: playerRoom, name });
       hasJoinedRef.current = true;
       currentRoomRef.current = playerRoom;
     };
 
     const handleConnect = () => {
+      debugLog("[Socket] connected");
       setIsConnected(true);
       joinPlayerRoom();
     };
 
-    const handlePlayerCount = (data: { room: string; playerCount: number }) => {
-      const actualPlayerCount = Math.max(0, data.playerCount - 1);
-      onPlayerCountChangeRef.current?.(actualPlayerCount);
-    };
-
     const handleGameResult = (data: GameResultPayload) => {
+      debugLog("[Socket] game-result received");
       onGameResultRef.current?.(data);
     };
 
     const handleDisconnect = () => {
+      debugLog("[Socket] disconnected");
       setIsConnected(false);
       hasJoinedRef.current = false;
       currentRoomRef.current = "";
       throwCountRef.current = 0;
-
-      if (assignedSlotRef.current) {
-        releaseSlot(room, assignedSlotRef.current);
-        console.log(`Released slot ${assignedSlotRef.current}`);
-      }
     };
 
     socket.on("connect", handleConnect);
     socket.on("disconnect", handleDisconnect);
-    socket.on("joinedRoom", handlePlayerCount);
-    socket.on("roomPlayerCount", handlePlayerCount);
     socket.on("game-result", handleGameResult);
 
-    // 리스너 설정 후 이미 연결된 경우 처리
     if (socket.connected && !hasJoinedRef.current) {
       handleConnect();
     }
@@ -144,30 +108,26 @@ export function useMobileSocket({
     return () => {
       socket.off("connect", handleConnect);
       socket.off("disconnect", handleDisconnect);
-      socket.off("joinedRoom", handlePlayerCount);
-      socket.off("roomPlayerCount", handlePlayerCount);
       socket.off("game-result", handleGameResult);
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [room, name, enabled]);
+  }, [room, name, enabled, slot]);
 
+  // unmount 시 정리
   useEffect(() => {
     return () => {
-      socket.disconnect();
+      if (socket.connected && currentRoomRef.current) {
+        debugLog(`[Socket] leaveRoom (unmount): ${currentRoomRef.current}`);
+        socket.emit("leaveRoom", { room: currentRoomRef.current });
+      }
       hasJoinedRef.current = false;
       currentRoomRef.current = "";
-
-      if (assignedSlotRef.current) {
-        releaseSlot(room, assignedSlotRef.current);
-        console.log(`Released slot ${assignedSlotRef.current} on unmount`);
-      }
     };
-  }, [room]);
+  }, []);
 
   const emitAimUpdate = useCallback(
     (aim: { x: number; y: number }, skin?: string) => {
-      if (!socket.connected || !assignedSlotRef.current) return;
-      const playerRoom = getPlayerRoom(room, assignedSlotRef.current);
+      if (!socket.connected || !slotRef.current) return;
+      const playerRoom = getPlayerRoom(room, slotRef.current);
       socket.emit("aim-update", {
         room: playerRoom,
         name,
@@ -180,8 +140,8 @@ export function useMobileSocket({
 
   const emitThrowDart = useCallback(
     (payload: { aim: { x: number; y: number }; score: number }) => {
-      if (!socket.connected || !assignedSlotRef.current) return;
-      const playerRoom = getPlayerRoom(room, assignedSlotRef.current);
+      if (!socket.connected || !slotRef.current) return;
+      const playerRoom = getPlayerRoom(room, slotRef.current);
       socket.emit("throw-dart", {
         room: playerRoom,
         name,
@@ -200,23 +160,23 @@ export function useMobileSocket({
   );
 
   const emitAimOff = useCallback(() => {
-    if (!socket.connected || !assignedSlotRef.current) return;
-    const playerRoom = getPlayerRoom(room, assignedSlotRef.current);
+    if (!socket.connected || !slotRef.current) return;
+    const playerRoom = getPlayerRoom(room, slotRef.current);
     socket.emit("aim-off", { room: playerRoom, name });
   }, [room, name]);
 
   const leaveGame = useCallback(() => {
-    if (assignedSlotRef.current) {
-      releaseSlot(room, assignedSlotRef.current);
-      assignedSlotRef.current = null;
+    if (socket.connected && currentRoomRef.current) {
+      debugLog(`[Socket] leaveRoom: ${currentRoomRef.current}`);
+      socket.emit("leaveRoom", { room: currentRoomRef.current });
+      socket.emit("aim-off", { room: currentRoomRef.current, name });
     }
+
     throwCountRef.current = 0;
     hasJoinedRef.current = false;
     currentRoomRef.current = "";
-    if (socket.connected) {
-      socket.disconnect();
-    }
-  }, [room]);
+    slotRef.current = null;
+  }, [name]);
 
   return {
     emitAimUpdate,
