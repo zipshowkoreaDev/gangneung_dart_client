@@ -67,6 +67,7 @@ export function useMobileSocket({
     }
 
     if (!socket.connected) {
+      socket.io.opts.query = { room, name };
       socket.connect();
     }
 

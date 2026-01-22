@@ -3,6 +3,7 @@
 import { useState } from "react";
 import dynamic from "next/dynamic";
 import { useDisplaySocket } from "@/hooks/useDisplaySocket";
+import { socket } from "@/shared/socket";
 import { generateSessionToken } from "@/lib/session";
 import Scoreboard, { PlayerScore } from "./components/Scoreboard";
 import AimOverlay from "./components/AimOverlay";
@@ -55,6 +56,13 @@ export default function DisplayPage() {
           playerOrder={playerOrder}
           players={players}
         />
+        <button
+          type="button"
+          onClick={() => socket.emit("reset-queue", { project: "dart" })}
+          className="absolute right-4 top-[210px] px-2.5 py-1 text-[10px] font-semibold rounded bg-white/80 text-black shadow hover:bg-white"
+        >
+          큐 초기화
+        </button>
         <DartCanvas />
       </div>
     </div>

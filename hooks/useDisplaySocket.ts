@@ -105,6 +105,7 @@ export function useDisplaySocket({
     };
 
     if (!socket.connected) {
+      socket.io.opts.query = { room, name: "_display" };
       socket.connect();
     }
 

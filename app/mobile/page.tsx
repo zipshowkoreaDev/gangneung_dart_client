@@ -57,6 +57,36 @@ export default function MobilePage() {
     return () => stopSensors();
   }, [stopSensors]);
 
+  useEffect(() => {
+    const emitLeaveQueue = () => {
+      if (!joinedQueueRef.current) return;
+      debugLog("[Queue] leave-queue emit (page hide)");
+      socket.emit("leave-queue");
+      joinedQueueRef.current = false;
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "hidden") {
+        emitLeaveQueue();
+      }
+    };
+
+    window.addEventListener("pagehide", emitLeaveQueue);
+    window.addEventListener("beforeunload", emitLeaveQueue);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+      if (joinedQueueRef.current) {
+        debugLog("[Queue] leave-queue emit (unmount)");
+        socket.emit("leave-queue");
+        joinedQueueRef.current = false;
+      }
+      window.removeEventListener("pagehide", emitLeaveQueue);
+      window.removeEventListener("beforeunload", emitLeaveQueue);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, []);
+
   // throwsLeft가 0이 되면 결과 화면으로 전환
   useEffect(() => {
     if (isInGame && throwsLeft === 0 && !hasFinishedTurn) {
@@ -113,6 +143,7 @@ export default function MobilePage() {
     // 소켓 연결
     if (!socket.connected) {
       debugLog("[Socket] 연결 시도...");
+      socket.io.opts.query = { room, name: customName };
       socket.connect();
     }
 
@@ -152,6 +183,7 @@ export default function MobilePage() {
     debugLog(`[Queue] 대기열 모드, socket: ${socket.connected}`);
 
     if (!socket.connected) {
+      socket.io.opts.query = { room, name: customName };
       socket.connect();
     }
 
