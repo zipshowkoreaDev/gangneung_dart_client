@@ -32,7 +32,6 @@ export default function DisplayPage() {
     const baseUrl = `${window.location.protocol}//${window.location.host}`;
     const token = generateSessionToken();
     const url = `${baseUrl}/auth/${token}?room=${ROOM}`;
-    console.log("Display QR URL:", url);
     return url;
   });
 

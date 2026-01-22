@@ -160,7 +160,9 @@ export function useDisplaySocket({
 
       const score = getHitScore(data.aim);
       const hitSound = new Audio("/sound/hit.mp3");
-      hitSound.play().catch((e) => console.error("Sound play failed:", e));
+      hitSound.play().catch((e) => {
+        onLog?.(`Sound play failed: ${String(e)}`);
+      });
 
       setPlayers((prev) => {
         const next = new Map(prev);
@@ -291,6 +293,9 @@ export function useDisplaySocket({
         });
 
         setPlayerOrder((prev) => prev.filter((name) => name !== key));
+        window.dispatchEvent(
+          new CustomEvent("CLEAR_PLAYER_DARTS", { detail: { key } })
+        );
 
         if (data.room && finishedPlayer) {
           emitFinishGame(data.room, finishedPlayer);
@@ -349,6 +354,10 @@ export function useDisplaySocket({
       window.dispatchEvent(new CustomEvent("GAME_FINISHED", { detail: data }));
     };
 
+    const onResetQueue = () => {
+      window.dispatchEvent(new CustomEvent("RESET_SCENE"));
+    };
+
     socket.on("connect", onConnect);
     socket.on("clientInfo", onClientInfo);
     socket.on("joinedRoom", onJoinedRoom);
@@ -358,6 +367,7 @@ export function useDisplaySocket({
     socket.on("aim-off", onAimOff);
     socket.on("game-result", onGameResult);
     socket.on("game-finished", onGameFinished);
+    socket.on("reset-queue", onResetQueue);
 
     return () => {
       socket.off("connect", onConnect);
@@ -369,6 +379,7 @@ export function useDisplaySocket({
       socket.off("aim-off", onAimOff);
       socket.off("game-result", onGameResult);
       socket.off("game-finished", onGameFinished);
+      socket.off("reset-queue", onResetQueue);
     };
   }, [
     room,

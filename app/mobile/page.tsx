@@ -28,6 +28,10 @@ export default function MobilePage() {
   const [queueSnapshot, setQueueSnapshot] = useState<string[] | null>(null);
   const joinedQueueRef = useRef(false);
   const motionPermissionRef = useRef(false);
+  const aimTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const startAimTimeoutRef = useRef<() => void>(() => {});
+  const isInGameRef = useRef(false);
+  const hasFinishedTurnRef = useRef(false);
 
   const { emitAimUpdate, emitAimOff, emitThrowDart, leaveGame } = useMobileSocket({
     room,
@@ -35,6 +39,14 @@ export default function MobilePage() {
     enabled: hasJoined,
     slot: assignedSlot,
   });
+
+  const emitAimUpdateWithTimeout = useCallback(
+    (aim: { x: number; y: number }, skin?: string) => {
+      startAimTimeoutRef.current();
+      emitAimUpdate(aim, skin);
+    },
+    [emitAimUpdate]
+  );
 
   const {
     aimPosition,
@@ -48,14 +60,51 @@ export default function MobilePage() {
     requestMotionPermission,
     setHasFinishedTurn,
   } = useGyroscope({
-    emitAimUpdate,
+    emitAimUpdate: emitAimUpdateWithTimeout,
     emitAimOff,
     emitThrowDart,
   });
+  const startAimTimeout = useCallback(() => {
+    if (aimTimeoutRef.current) {
+      clearTimeout(aimTimeoutRef.current);
+    }
+
+    aimTimeoutRef.current = setTimeout(() => {
+      if (!isInGameRef.current || hasFinishedTurnRef.current) return;
+      debugLog("[Queue] no aim-update for 15s, auto leave");
+
+      if (joinedQueueRef.current) {
+        socket.emit("leave-queue");
+        joinedQueueRef.current = false;
+      }
+
+      setIsInQueue(false);
+      setQueuePosition(null);
+      setQueueSnapshot(null);
+      setAssignedSlot(null);
+      setHasJoined(false);
+      setIsInGame(false);
+      setHasFinishedTurn(false);
+      leaveGame();
+      stopSensors();
+    }, 15000);
+  }, [leaveGame, stopSensors]);
 
   useEffect(() => {
     return () => stopSensors();
   }, [stopSensors]);
+
+  useEffect(() => {
+    isInGameRef.current = isInGame;
+  }, [isInGame]);
+
+  useEffect(() => {
+    hasFinishedTurnRef.current = hasFinishedTurn;
+  }, [hasFinishedTurn]);
+
+  useEffect(() => {
+    startAimTimeoutRef.current = startAimTimeout;
+  }, [startAimTimeout]);
 
   useEffect(() => {
     const emitLeaveQueue = () => {
@@ -65,15 +114,8 @@ export default function MobilePage() {
       joinedQueueRef.current = false;
     };
 
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === "hidden") {
-        emitLeaveQueue();
-      }
-    };
-
     window.addEventListener("pagehide", emitLeaveQueue);
     window.addEventListener("beforeunload", emitLeaveQueue);
-    document.addEventListener("visibilitychange", handleVisibilityChange);
 
     return () => {
       if (joinedQueueRef.current) {
@@ -83,7 +125,6 @@ export default function MobilePage() {
       }
       window.removeEventListener("pagehide", emitLeaveQueue);
       window.removeEventListener("beforeunload", emitLeaveQueue);
-      document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
   }, []);
 
@@ -108,7 +149,8 @@ export default function MobilePage() {
     setHasJoined(true);
     setIsInGame(true);
     startSensors();
-  }, [startSensors]);
+    startAimTimeout();
+  }, [startSensors, startAimTimeout]);
 
   // 대기열 나가기
   const leaveQueue = useCallback(() => {
@@ -232,6 +274,10 @@ export default function MobilePage() {
     socket.on("error", onError);
     socket.on("status-queue", onStatusQueue);
 
+    if (socket.connected) {
+      onConnect();
+    }
+
     return () => {
       socket.off("connect", onConnect);
       socket.off("connect_error", onConnectError);
@@ -245,6 +291,14 @@ export default function MobilePage() {
     if (!hasFinishedTurn || !isInQueue) return;
     leaveQueue();
   }, [hasFinishedTurn, isInQueue, leaveQueue]);
+
+  useEffect(() => {
+    if (isInGame && !hasFinishedTurn) return;
+    if (aimTimeoutRef.current) {
+      clearTimeout(aimTimeoutRef.current);
+      aimTimeoutRef.current = null;
+    }
+  }, [isInGame, hasFinishedTurn]);
 
   // 대기 중인지 여부 (대기열에 있지만 아직 게임 안 함)
   const isWaitingInQueue =

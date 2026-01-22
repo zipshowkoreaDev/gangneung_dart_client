@@ -88,11 +88,13 @@ function FlyingDart({ targetPosition, onComplete }: FlyingDartProps) {
 interface ThrownDart {
   id: string;
   position: [number, number, number];
+  ownerKey: string;
 }
 
 interface FlyingDartData {
   id: string;
   position: [number, number, number];
+  ownerKey: string;
 }
 
 function RotatingRoulette({
@@ -136,7 +138,7 @@ function RotatingRoulette({
 function DartEventHandler({
   onDartThrow,
 }: {
-  onDartThrow: (position: [number, number, number]) => void;
+  onDartThrow: (position: [number, number, number], ownerKey: string) => void;
 }) {
   const { camera } = useThree();
 
@@ -161,9 +163,12 @@ function DartEventHandler({
       const intersectPoint = new THREE.Vector3();
       raycaster.ray.intersectPlane(plane, intersectPoint);
 
-      console.log("🎯 Aim:", { x, y }, "→ 3D:", intersectPoint);
-
-      onDartThrow([intersectPoint.x, intersectPoint.y, intersectPoint.z]);
+      const ownerKey =
+        data.playerId || data.name || data.socketId || "player";
+      onDartThrow(
+        [intersectPoint.x, intersectPoint.y, intersectPoint.z],
+        ownerKey
+      );
     };
 
     window.addEventListener("DART_THROW", handleThrow);
@@ -186,7 +191,25 @@ export default function Scene() {
     return () => window.removeEventListener("RESET_SCENE", handleReset);
   }, []);
 
-  const handleDartThrow = (position: [number, number, number]) => {
+  useEffect(() => {
+    const handleClearPlayerDarts = (event: Event) => {
+      const customEvent = event as CustomEvent;
+      const key = customEvent.detail?.key as string | undefined;
+      if (!key) return;
+
+      setFlyingDarts((prev) => prev.filter((dart) => dart.ownerKey !== key));
+      setStuckDarts((prev) => prev.filter((dart) => dart.ownerKey !== key));
+    };
+
+    window.addEventListener("CLEAR_PLAYER_DARTS", handleClearPlayerDarts);
+    return () =>
+      window.removeEventListener("CLEAR_PLAYER_DARTS", handleClearPlayerDarts);
+  }, []);
+
+  const handleDartThrow = (
+    position: [number, number, number],
+    ownerKey: string
+  ) => {
     const dartId = `${Date.now()}-${Math.random()}`;
 
     // 먼저 날아가는 다트로 추가
@@ -195,13 +218,17 @@ export default function Scene() {
       {
         id: dartId,
         position,
+        ownerKey,
       },
     ]);
 
     // 애니메이션 시간 후 꽂힌 다트로 이동
     setTimeout(() => {
       setFlyingDarts((prev) => prev.filter((d) => d.id !== dartId));
-      setStuckDarts((prev) => [...prev, { id: dartId, position }]);
+      setStuckDarts((prev) => [
+        ...prev,
+        { id: dartId, position, ownerKey },
+      ]);
     }, 700);
   };
 

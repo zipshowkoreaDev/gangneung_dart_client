@@ -13,7 +13,6 @@ export function setQRSession(token: string): void {
     sessionStorage.setItem(SESSION_KEY, token);
     sessionStorage.setItem(SESSION_TIMESTAMP_KEY, Date.now().toString());
   } catch (error) {
-    console.error("Failed to set QR session:", error);
   }
 }
 
@@ -40,7 +39,6 @@ export function getQRSession(): string | null {
 
     return token;
   } catch (error) {
-    console.error("Failed to get QR session:", error);
     return null;
   }
 }
@@ -53,7 +51,6 @@ export function clearQRSession(): void {
     sessionStorage.removeItem(SESSION_KEY);
     sessionStorage.removeItem(SESSION_TIMESTAMP_KEY);
   } catch (error) {
-    console.error("Failed to clear QR session:", error);
   }
 }
 
