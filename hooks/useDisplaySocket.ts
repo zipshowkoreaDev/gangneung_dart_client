@@ -216,6 +216,7 @@ export function useDisplaySocket({
       room: string;
       name?: string;
       socketId?: string;
+      skin?: string;
       aim: { x: number; y: number };
       score: number;
     }) => {
@@ -231,6 +232,12 @@ export function useDisplaySocket({
       const hitSound = new Audio("/sound/hit.mp3");
       hitSound.play().catch((e) => {
         onLog?.(`Sound play failed: ${String(e)}`);
+      });
+
+      setAimPositions((prev) => {
+        const next = new Map(prev);
+        next.set(key, { x: data.aim.x, y: data.aim.y, skin: data.skin });
+        return next;
       });
 
       setPlayers((prev) => {
@@ -461,6 +468,7 @@ export function useDisplaySocket({
     setAimPositions,
     setPlayers,
     setPlayerOrder,
+    setPlayerRoomCounts,
     emitFinishGame,
   ]);
 

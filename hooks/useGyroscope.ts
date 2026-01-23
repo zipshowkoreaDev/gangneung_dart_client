@@ -3,7 +3,7 @@ import { useState, useRef, useCallback } from "react";
 const ARMING_MS = 600;
 const MAG_THRESH = 18;
 const JERK_THRESH = 8;
-const THROW_COOLDOWN_MS = 700;
+const THROW_COOL_DOWN_MS = 700;
 const AIM_HZ = 30;
 const AIM_INTERVAL = 1000 / AIM_HZ;
 const BASELINE_SAMPLES = 12;
@@ -53,10 +53,6 @@ interface UseGyroscopeProps {
   rouletteRadius?: number;
 }
 
-function clamp(n: number, min: number, max: number) {
-  return Math.max(min, Math.min(max, n));
-}
-
 function aimTo3D(aim: { x: number; y: number }): { x: number; y: number } {
   return {
     x: aim.x * AIM_TO_3D_SCALE,
@@ -96,6 +92,7 @@ export function useGyroscope({
   emitThrowDart,
   rouletteRadius,
 }: UseGyroscopeProps) {
+  // 룰렛 반지름 값 결정 (URL 파라미터 우선)
   const currentRouletteRadius =
     typeof rouletteRadius === "number" && rouletteRadius > 0
       ? rouletteRadius
@@ -110,15 +107,19 @@ export function useGyroscope({
   const sensorsActiveRef = useRef(false);
   const lastAimSentRef = useRef(0);
   const gravityZRef = useRef(0);
+  const filteredGravityZRef = useRef(0);
+  const faceUpRef = useRef(true);
   const aimRef = useRef(aimPosition);
   const readyRef = useRef(true);
   const aimReadyRef = useRef(false);
   const throwCountRef = useRef(0);
   const baseGammaSumRef = useRef(0);
   const baseBetaSumRef = useRef(0);
+  const baseAlphaSumRef = useRef(0);
   const baseSamplesRef = useRef(0);
   const baseGammaRef = useRef(0);
   const baseBetaRef = useRef(0);
+  const baseAlphaRef = useRef(0);
   const armedAtRef = useRef(0);
   const baselineSumRef = useRef(0);
   const baselineSamplesRef = useRef(0);
@@ -132,6 +133,7 @@ export function useGyroscope({
   const norm = (v: number, a: number, b: number) =>
     Math.max(-1, Math.min(1, ((v - a) / (b - a)) * 2 - 1));
 
+  // iOS 권한 요청
   const requestMotionPermission = async (): Promise<boolean> => {
     try {
       if (
@@ -172,6 +174,7 @@ export function useGyroscope({
     }
   };
 
+  // 센서 정지 및 상태 초기화
   const stopSensors = useCallback(() => {
     if (!sensorsActiveRef.current) return;
 
@@ -182,7 +185,9 @@ export function useGyroscope({
     throwCountRef.current = 0;
     baseGammaSumRef.current = 0;
     baseBetaSumRef.current = 0;
+    baseAlphaSumRef.current = 0;
     baseSamplesRef.current = 0;
+    baseAlphaRef.current = 0;
 
     if (handleOrientationRef.current) {
       window.removeEventListener(
@@ -199,6 +204,7 @@ export function useGyroscope({
     emitAimOff();
   }, [emitAimOff]);
 
+  // 센서 시작 및 초기 보정/상태 세팅
   const startSensors = useCallback(() => {
     if (sensorsActiveRef.current) return;
 
@@ -212,9 +218,11 @@ export function useGyroscope({
     throwCountRef.current = 0;
     baseGammaSumRef.current = 0;
     baseBetaSumRef.current = 0;
+    baseAlphaSumRef.current = 0;
     baseSamplesRef.current = 0;
     baseGammaRef.current = 0;
     baseBetaRef.current = 0;
+    baseAlphaRef.current = 0;
     armedAtRef.current = performance.now();
     baselineSumRef.current = 0;
     baselineSamplesRef.current = 0;
@@ -226,31 +234,52 @@ export function useGyroscope({
       /iPad|iPhone|iPod/.test(navigator.userAgent);
     const gammaRange = isIOS ? 20 : 35;
     const betaRange = isIOS ? 20 : 35;
+    const alphaRange = 25;
+    if (isIOS) {
+      faceUpRef.current = true;
+    }
 
+    const deltaAngle = (current: number, base: number) => {
+      let delta = current - base;
+      if (delta > 180) delta -= 360;
+      if (delta < -180) delta += 360;
+      return delta;
+    };
+
+    // 기기 방향 → 조준 좌표 계산
     handleOrientationRef.current = (e: DeviceOrientationEvent) => {
       const gamma = e.gamma ?? 0;
       const beta = e.beta ?? 0;
+      const alpha = e.alpha ?? 0;
 
       if (baseSamplesRef.current < BASELINE_SAMPLES) {
         baseGammaSumRef.current += gamma;
         baseBetaSumRef.current += beta;
+        baseAlphaSumRef.current += alpha;
         baseSamplesRef.current += 1;
         if (baseSamplesRef.current === BASELINE_SAMPLES) {
           baseGammaRef.current = baseGammaSumRef.current / BASELINE_SAMPLES;
           baseBetaRef.current = baseBetaSumRef.current / BASELINE_SAMPLES;
+          baseAlphaRef.current = baseAlphaSumRef.current / BASELINE_SAMPLES;
         }
       }
 
       const g = gamma - baseGammaRef.current;
       const b = beta - baseBetaRef.current;
+      const a = deltaAngle(alpha, baseAlphaRef.current);
 
-      const x = norm(g, -gammaRange, gammaRange);
-      const y0 = isIOS
+      let x = norm(g, -gammaRange, gammaRange);
+      let y0 = isIOS
         ? norm(b, -betaRange, betaRange)
         : -norm(b, -betaRange, betaRange);
-      const faceUp =
-        Math.abs(gravityZRef.current) > 4 && gravityZRef.current < 0;
-      const y = faceUp ? -y0 : y0;
+
+      // 눕힌 상태(화면이 천장)에서는 yaw(alpha)을 X, roll(gamma)을 Y로 사용
+      if (faceUpRef.current) {
+        x = norm(a, -alphaRange, alphaRange);
+        y0 = norm(g, -gammaRange, gammaRange);
+      }
+
+      const y = faceUpRef.current ? -y0 : y0;
 
       aimRef.current = { x, y };
       setAimPosition({ x, y });
@@ -263,9 +292,24 @@ export function useGyroscope({
       }
     };
 
+    // 던짐 감지 (가속도 변화 기반)
     handleMotionRef.current = (e: DeviceMotionEvent) => {
       const ag = e.accelerationIncludingGravity || { x: 0, y: 0, z: 0 };
       gravityZRef.current = ag.z || 0;
+      filteredGravityZRef.current =
+        filteredGravityZRef.current * 0.8 + gravityZRef.current * 0.2;
+
+      // iOS에서 faceUp 판정 흔들림 방지 (히스테리시스 적용)
+      const FACE_UP_ON = -4;
+      const FACE_UP_OFF = -2;
+      if (!faceUpRef.current && filteredGravityZRef.current < FACE_UP_ON) {
+        faceUpRef.current = true;
+      } else if (
+        faceUpRef.current &&
+        filteredGravityZRef.current > FACE_UP_OFF
+      ) {
+        faceUpRef.current = false;
+      }
 
       const now = performance.now();
       if (now < throwBlockedUntilRef.current) {
@@ -296,8 +340,9 @@ export function useGyroscope({
         jerk > JERK_THRESH
       ) {
         readyRef.current = false;
-        throwBlockedUntilRef.current = now + THROW_COOLDOWN_MS;
+        throwBlockedUntilRef.current = now + THROW_COOL_DOWN_MS;
 
+        // 던짐 점수 계산 및 전송
         const hitResult = getHitResult(aimRef.current, currentRouletteRadius);
         setMyScore((prev) => prev + hitResult.score);
 
