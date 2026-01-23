@@ -1,11 +1,13 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import dynamic from "next/dynamic";
 import { useDisplaySocket } from "@/hooks/useDisplaySocket";
 import { generateSessionToken } from "@/lib/session";
+import { getRankings, addRanking, RankingEntry } from "@/lib/ranking";
 import Scoreboard, { PlayerScore } from "./components/Scoreboard";
 import AimOverlay from "./components/AimOverlay";
+import RankingBoard from "./components/RankingBoard";
 import { getRouletteRadius } from "@/three/Scene";
 const DisplayQRCode = dynamic(() => import("./components/DisplayQRCode"), {
   ssr: false,
@@ -25,9 +27,20 @@ export default function DisplayPage() {
   const [, setPlayerRoomCounts] = useState<Map<string, number>>(
     () => new Map()
   );
+  const [rankings, setRankings] = useState<RankingEntry[]>([]);
 
   const tokenRef = useRef<string | null>(null);
   const [mobileUrl, setMobileUrl] = useState("");
+
+  // 초기 랭킹 로드
+  useEffect(() => {
+    setRankings(getRankings());
+  }, []);
+
+  const handlePlayerFinish = useCallback((name: string, score: number) => {
+    const updated = addRanking(name, score);
+    setRankings(updated);
+  }, []);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -69,6 +82,7 @@ export default function DisplayPage() {
     setPlayerRoomCounts,
     players,
     playerOrder,
+    onPlayerFinish: handlePlayerFinish,
   });
 
   return (
@@ -82,6 +96,7 @@ export default function DisplayPage() {
           players={players}
         />
         <DartCanvas />
+        <RankingBoard rankings={rankings} />
       </div>
     </div>
   );

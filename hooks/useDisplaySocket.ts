@@ -31,6 +31,7 @@ interface UseDisplaySocketProps {
   setPlayerRoomCounts: Dispatch<SetStateAction<Map<string, number>>>;
   players: Map<string, PlayerScore>;
   playerOrder: string[];
+  onPlayerFinish?: (name: string, score: number) => void;
 }
 
 function clamp(n: number, min: number, max: number) {
@@ -116,9 +117,11 @@ export function useDisplaySocket({
   setPlayerRoomCounts,
   players,
   playerOrder,
+  onPlayerFinish,
 }: UseDisplaySocketProps) {
   const playersRef = useRef(players);
   const playerOrderRef = useRef(playerOrder);
+  const onPlayerFinishRef = useRef(onPlayerFinish);
 
   useEffect(() => {
     playersRef.current = players;
@@ -127,6 +130,10 @@ export function useDisplaySocket({
   useEffect(() => {
     playerOrderRef.current = playerOrder;
   }, [playerOrder]);
+
+  useEffect(() => {
+    onPlayerFinishRef.current = onPlayerFinish;
+  }, [onPlayerFinish]);
 
   const emitFinishGame = useCallback(
     (targetRoom: string, player: PlayerScore, socketId?: string) => {
@@ -345,18 +352,14 @@ export function useDisplaySocket({
       });
 
       if (key !== "_display") {
-        let finishedPlayer: PlayerScore | null = null;
+        const finishedPlayer = playersRef.current.get(key);
 
         setPlayers((prev) => {
           const next = new Map(prev);
-          const player = prev.get(key);
-
-          if (player) {
-            finishedPlayer = player;
+          if (prev.has(key)) {
             next.delete(key);
             onLog?.(`Aim off: ${key}`);
           }
-
           return next;
         });
 
@@ -369,6 +372,7 @@ export function useDisplaySocket({
 
         if (data.room && finishedPlayer) {
           emitFinishGame(data.room, finishedPlayer, data.socketId);
+          onPlayerFinishRef.current?.(finishedPlayer.name, finishedPlayer.score);
         }
       }
     };
