@@ -131,6 +131,7 @@ export function useMobileSocket({
       const playerRoom = getPlayerRoom(room, slotRef.current);
       socket.emit("aim-update", {
         room: playerRoom,
+        socketId: socket.id,
         name,
         skin,
         aim,
@@ -145,6 +146,7 @@ export function useMobileSocket({
       const playerRoom = getPlayerRoom(room, slotRef.current);
       socket.emit("throw-dart", {
         room: playerRoom,
+        socketId: socket.id,
         name,
         aim: payload.aim,
         score: payload.score,
@@ -163,14 +165,18 @@ export function useMobileSocket({
   const emitAimOff = useCallback(() => {
     if (!socket.connected || !slotRef.current) return;
     const playerRoom = getPlayerRoom(room, slotRef.current);
-    socket.emit("aim-off", { room: playerRoom, name });
+    socket.emit("aim-off", { room: playerRoom, socketId: socket.id, name });
   }, [room, name]);
 
   const leaveGame = useCallback(() => {
     if (socket.connected && currentRoomRef.current) {
       debugLog(`[Socket] leaveRoom: ${currentRoomRef.current}`);
       socket.emit("leaveRoom", { room: currentRoomRef.current });
-      socket.emit("aim-off", { room: currentRoomRef.current, name });
+      socket.emit("aim-off", {
+        room: currentRoomRef.current,
+        socketId: socket.id,
+        name,
+      });
     }
 
     throwCountRef.current = 0;

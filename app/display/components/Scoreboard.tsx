@@ -1,6 +1,7 @@
 "use client";
 
 type PlayerScore = {
+  socketId?: string;
   name: string;
   score: number;
   isConnected: boolean;
@@ -44,7 +45,7 @@ export default function Scoreboard({
     <div className="absolute top-0 left-0 w-full bg-white/20 backdrop-blur-md flex gap-5 p-5 z-10 shadow-md">
       {slots.map((player, index) => (
         <div
-          key={player?.name || `slot-${index}`}
+          key={player?.socketId || player?.name || `slot-${index}`}
           className="flex-1 bg-white/40 rounded-lg"
         >
           {renderPlayerCard(player)}

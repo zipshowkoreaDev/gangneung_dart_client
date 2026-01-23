@@ -9,7 +9,7 @@ type AimPosition = {
 type AimOverlayProps = {
   aimPositions: Map<string, AimPosition>;
   playerOrder: string[];
-  players: Map<string, { isReady: boolean }>;
+  players: Map<string, { isReady: boolean; name?: string }>;
 };
 
 function resolveColor(playerKey: string, playerOrder: string[]) {
@@ -90,7 +90,7 @@ export default function AimOverlay({
                   whiteSpace: "nowrap",
                 }}
               >
-                {playerKey}
+                {players.get(playerKey)?.name ?? playerKey}
               </div>
             </div>
           );

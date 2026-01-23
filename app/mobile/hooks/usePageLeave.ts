@@ -11,24 +11,48 @@ interface UsePageLeaveProps {
 // 페이지 이탈 시 대기열 정리 hook
 export function usePageLeave({ joinedQueueRef }: UsePageLeaveProps): void {
   useEffect(() => {
-    const emitLeaveQueue = () => {
+    const emitLeaveQueue = (reason: string) => {
       if (!joinedQueueRef.current) return;
-      debugLog("[Queue] leave-queue emit (page hide)");
+      debugLog(`[Queue] leave-queue emit (${reason})`);
+      try {
+        socket.emit("leave-queue");
+      } catch {
+        // ignore
+      }
+      try {
+        socket.timeout(200).emit("leave-queue");
+      } catch {
+        // ignore
+      }
       socket.emit("leave-queue");
       joinedQueueRef.current = false;
     };
 
-    window.addEventListener("pagehide", emitLeaveQueue);
-    window.addEventListener("beforeunload", emitLeaveQueue);
+    const onPageHide = () => emitLeaveQueue("pagehide");
+    const onBeforeUnload = () => emitLeaveQueue("beforeunload");
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "hidden") {
+        emitLeaveQueue("visibilitychange");
+      }
+    };
+    const onFreeze = () => emitLeaveQueue("freeze");
+    const onOffline = () => emitLeaveQueue("offline");
+
+    window.addEventListener("pagehide", onPageHide);
+    window.addEventListener("beforeunload", onBeforeUnload);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    window.addEventListener("freeze", onFreeze as EventListener);
+    window.addEventListener("offline", onOffline);
 
     return () => {
       if (joinedQueueRef.current) {
-        debugLog("[Queue] leave-queue emit (unmount)");
-        socket.emit("leave-queue");
-        joinedQueueRef.current = false;
+        emitLeaveQueue("unmount");
       }
-      window.removeEventListener("pagehide", emitLeaveQueue);
-      window.removeEventListener("beforeunload", emitLeaveQueue);
+      window.removeEventListener("pagehide", onPageHide);
+      window.removeEventListener("beforeunload", onBeforeUnload);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      window.removeEventListener("freeze", onFreeze as EventListener);
+      window.removeEventListener("offline", onOffline);
     };
   }, [joinedQueueRef]);
 }

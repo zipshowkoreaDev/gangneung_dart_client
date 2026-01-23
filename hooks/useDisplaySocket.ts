@@ -11,6 +11,8 @@ import { getDisplayRoom, getAllPlayerRooms } from "@/lib/room";
 type AimState = Map<string, { x: number; y: number; skin?: string }>;
 
 type PlayerScore = {
+  socketId?: string;
+  serverName?: string;
   name: string;
   score: number;
   isConnected: boolean;
@@ -47,7 +49,12 @@ function resolvePlayerKey(data: {
   name?: string;
   socketId?: string;
 }) {
-  return data.playerId || data.name || data.socketId || "player";
+  return data.socketId || data.playerId || data.name || "player";
+}
+
+function stripDisplayName(name: string) {
+  const [base] = name.split("#");
+  return base || name;
 }
 
 export function useDisplaySocket({
@@ -72,12 +79,13 @@ export function useDisplaySocket({
   }, [playerOrder]);
 
   const emitFinishGame = useCallback(
-    (targetRoom: string, player: PlayerScore) => {
+    (targetRoom: string, player: PlayerScore, socketId?: string) => {
       socket.emit("finish-game", {
         room: targetRoom,
         scores: [
           {
-            socketId: player.name,
+            socketId:
+              socketId ?? player.socketId ?? player.serverName ?? player.name,
             name: player.name,
             score: player.score,
           },
@@ -147,14 +155,16 @@ export function useDisplaySocket({
 
     const onDartThrown = (data: {
       room: string;
-      name: string;
+      name?: string;
+      socketId?: string;
       aim: { x: number; y: number };
       score: number;
     }) => {
       if (!isPlayerRoomEvent(data.room)) return;
 
-      if (!playersRef.current.has(data.name)) {
-        onLog?.(`Ignored dart from unknown player ${data.name}`);
+      const key = resolvePlayerKey(data);
+      if (!playersRef.current.has(key)) {
+        onLog?.(`Ignored dart from unknown player ${key}`);
         return;
       }
 
@@ -166,20 +176,20 @@ export function useDisplaySocket({
 
       setPlayers((prev) => {
         const next = new Map(prev);
-        const player = prev.get(data.name);
+        const player = prev.get(key);
 
         if (player) {
           const newCurrentThrows = player.currentThrows + 1;
           const isLastThrow = newCurrentThrows >= 3;
 
-          next.set(data.name, {
+          next.set(key, {
             ...player,
             score: player.score + score,
             totalThrows: player.totalThrows + 1,
             currentThrows: isLastThrow ? 0 : newCurrentThrows,
           });
           onLog?.(
-            `Score: ${data.name} ${player.score} -> ${
+            `Score: ${player.name} ${player.score} -> ${
               player.score + score
             } (Throw ${newCurrentThrows}/3)`
           );
@@ -206,6 +216,7 @@ export function useDisplaySocket({
       const key = resolvePlayerKey(data);
       const x = clamp(data.aim?.x ?? 0, -1, 1);
       const y = clamp(data.aim?.y ?? 0, -1, 1);
+      const displayName = data.name ? stripDisplayName(data.name) : key;
 
       if (key && key !== "_display") {
         let shouldUpdateAim = true;
@@ -224,13 +235,18 @@ export function useDisplaySocket({
               ...existing,
               isConnected: true,
               isReady: true,
+              socketId: data.socketId ?? existing.socketId,
+              serverName: data.name ?? existing.serverName,
+              name: displayName ?? existing.name,
             });
             return next;
           }
 
           if (!prev.has(key)) {
             next.set(key, {
-              name: key,
+              socketId: data.socketId,
+              serverName: data.name,
+              name: displayName,
               score: 0,
               isConnected: true,
               isReady: true,
@@ -298,7 +314,7 @@ export function useDisplaySocket({
         );
 
         if (data.room && finishedPlayer) {
-          emitFinishGame(data.room, finishedPlayer);
+          emitFinishGame(data.room, finishedPlayer, data.socketId);
         }
       }
     };

@@ -30,11 +30,16 @@ export default function MobilePage() {
   const [assignedSlot, setAssignedSlot] = useState<1 | 2 | null>(null);
   const motionPermissionRef = useRef(false);
   const startAimTimeoutRef = useRef<() => void>(() => {});
+  const nameSuffixRef = useRef("");
   const { validateInput } = useProfanityCheck();
+
+  const socketName = customName.trim()
+    ? `${customName.trim()}#${nameSuffixRef.current}`
+    : "";
 
   const { emitAimUpdate, emitAimOff, emitThrowDart, leaveGame } = useMobileSocket({
     room,
-    name: customName,
+    name: socketName,
     enabled: hasJoined,
     slot: assignedSlot,
   });
@@ -83,7 +88,7 @@ export default function MobilePage() {
     connectAndJoinQueue,
   } = useQueue({
     room,
-    name: customName,
+    name: socketName,
     isInGame,
     onEnterGame: handleEnterGame,
   });
@@ -160,6 +165,7 @@ export default function MobilePage() {
     debugLog("=== handleExit ===");
     setHasFinishedTurn(false);
     setCustomName("");
+    nameSuffixRef.current = "";
     setAssignedSlot(null);
     setIsInGame(false);
     setHasJoined(false);
@@ -214,7 +220,18 @@ export default function MobilePage() {
       {sessionValid === true && !isInQueue && !hasFinishedTurn && !isInGame && (
         <NameInput
           name={customName}
-          onNameChange={setCustomName}
+          onNameChange={(value) => {
+            const trimmed = value.trim();
+            if (!trimmed) {
+              setCustomName("");
+              nameSuffixRef.current = "";
+              return;
+            }
+            if (!nameSuffixRef.current) {
+              nameSuffixRef.current = Math.random().toString(36).slice(2, 6);
+            }
+            setCustomName(value);
+          }}
           onStart={handleStart}
           errorMessage={
             customName.trim() && !nameValidation.isValid
