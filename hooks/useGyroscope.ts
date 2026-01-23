@@ -109,6 +109,7 @@ export function useGyroscope({
   const gravityZRef = useRef(0);
   const filteredGravityZRef = useRef(0);
   const faceUpRef = useRef(true);
+  const isIOSRef = useRef(false);
   const aimRef = useRef(aimPosition);
   const readyRef = useRef(true);
   const aimReadyRef = useRef(false);
@@ -232,6 +233,7 @@ export function useGyroscope({
     const isIOS =
       typeof navigator !== "undefined" &&
       /iPad|iPhone|iPod/.test(navigator.userAgent);
+    isIOSRef.current = isIOS;
     const gammaRange = isIOS ? 20 : 35;
     const betaRange = isIOS ? 20 : 35;
     const alphaRange = 25;
@@ -299,16 +301,21 @@ export function useGyroscope({
       filteredGravityZRef.current =
         filteredGravityZRef.current * 0.8 + gravityZRef.current * 0.2;
 
-      // iOS에서 faceUp 판정 흔들림 방지 (히스테리시스 적용)
-      const FACE_UP_ON = -4;
-      const FACE_UP_OFF = -2;
-      if (!faceUpRef.current && filteredGravityZRef.current < FACE_UP_ON) {
+      // iOS는 눕힌 상태 고정 (faceUp 토글 방지)
+      if (!isIOSRef.current) {
+        // iOS 외 디바이스: faceUp 판정 흔들림 방지 (히스테리시스 적용)
+        const FACE_UP_ON = -4;
+        const FACE_UP_OFF = -2;
+        if (!faceUpRef.current && filteredGravityZRef.current < FACE_UP_ON) {
+          faceUpRef.current = true;
+        } else if (
+          faceUpRef.current &&
+          filteredGravityZRef.current > FACE_UP_OFF
+        ) {
+          faceUpRef.current = false;
+        }
+      } else {
         faceUpRef.current = true;
-      } else if (
-        faceUpRef.current &&
-        filteredGravityZRef.current > FACE_UP_OFF
-      ) {
-        faceUpRef.current = false;
       }
 
       const now = performance.now();
