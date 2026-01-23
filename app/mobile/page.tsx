@@ -9,6 +9,7 @@ import { getRoomFromUrl } from "@/lib/room";
 import { useQueue } from "./hooks/useQueue";
 import { useAimTimeout } from "./hooks/useAimTimeout";
 import { usePageLeave } from "./hooks/usePageLeave";
+import useProfanityCheck from "@/hooks/useProfanityCheck";
 import SessionValidating from "./components/SessionValidating";
 import AccessDenied from "./components/AccessDenied";
 import NameInput from "./components/NameInput";
@@ -29,6 +30,7 @@ export default function MobilePage() {
   const [assignedSlot, setAssignedSlot] = useState<1 | 2 | null>(null);
   const motionPermissionRef = useRef(false);
   const startAimTimeoutRef = useRef<() => void>(() => {});
+  const { validateInput } = useProfanityCheck();
 
   const { emitAimUpdate, emitAimOff, emitThrowDart, leaveGame } = useMobileSocket({
     room,
@@ -136,6 +138,9 @@ export default function MobilePage() {
     debugLog("=== handleStart ===");
     setHasFinishedTurn(false);
 
+    const validation = validateInput(customName);
+    if (!validation.isValid) return;
+
     if (!motionPermissionRef.current) {
       try {
         const hasPermission = await requestMotionPermission();
@@ -177,6 +182,7 @@ export default function MobilePage() {
 
   const isWaitingInQueue =
     isInQueue && !isInGame && queuePosition !== null && queuePosition >= 2;
+  const nameValidation = validateInput(customName);
 
   return (
     <div className="h-screen flex flex-col items-center justify-center gap-8 bg-gradient-to-br from-[#1e3c72] to-[#2a5298] px-5">
@@ -210,6 +216,11 @@ export default function MobilePage() {
           name={customName}
           onNameChange={setCustomName}
           onStart={handleStart}
+          errorMessage={
+            customName.trim() && !nameValidation.isValid
+              ? nameValidation.message
+              : ""
+          }
         />
       )}
 
