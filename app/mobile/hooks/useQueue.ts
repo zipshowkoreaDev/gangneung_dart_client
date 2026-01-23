@@ -37,6 +37,7 @@ export function useQueue({
   const joinedQueueRef = useRef(false);
   const lastRejoinAtRef = useRef(0);
   const queueStartAtRef = useRef<number | null>(null);
+  const lastJoinedSocketIdRef = useRef<string | null>(null);
 
   const leaveQueue = useCallback(() => {
     if (joinedQueueRef.current) {
@@ -51,11 +52,16 @@ export function useQueue({
   }, []);
 
   const connectAndJoinQueue = useCallback(() => {
-    if (!socket.connected) {
-      debugLog("[Socket] 연결 시도...");
-      socket.io.opts.query = { room, name };
-      socket.connect();
+    if (socket.connected) {
+      debugLog("[Queue] 기존 소켓 연결 해제 후 재연결");
+      socket.emit("leave-queue");
+      socket.disconnect();
+      joinedQueueRef.current = false;
+      lastJoinedSocketIdRef.current = null;
     }
+    debugLog("[Socket] 연결 시도...");
+    socket.io.opts.query = { room, name };
+    socket.connect();
     setIsInQueue(true);
     queueStartAtRef.current = Date.now();
   }, [room, name]);
@@ -78,14 +84,18 @@ export function useQueue({
     };
 
     const onStatusQueue = (queue: string[]) => {
-      debugLog(`[Queue] status-queue: ${JSON.stringify(queue)}`);
-      setQueueSnapshot(queue);
+      const uniqueQueue = Array.from(new Set(queue));
+      debugLog(`[Queue] status-queue: ${JSON.stringify(uniqueQueue)}`);
+      setQueueSnapshot(uniqueQueue);
 
-      const position = findMyPosition(queue);
+      const position = findMyPosition(uniqueQueue);
       debugLog(`[Queue] 내 위치: ${position}`);
       setQueuePosition(position);
 
       if (position < 0 && joinedQueueRef.current) {
+        if (socket.id && lastJoinedSocketIdRef.current === socket.id) {
+          return;
+        }
         const now = Date.now();
         if (now - lastRejoinAtRef.current > 5000) {
           lastRejoinAtRef.current = now;
@@ -93,6 +103,9 @@ export function useQueue({
           socket.emit("leave-queue");
           socket.emit("join-queue");
           joinedQueueRef.current = true;
+          if (socket.id) {
+            lastJoinedSocketIdRef.current = socket.id;
+          }
         }
       }
 
@@ -105,10 +118,14 @@ export function useQueue({
 
     const onConnect = () => {
       debugLog("[Socket] connected (queue mode)");
-      debugLog("[Queue] re-sync join-queue");
-      socket.emit("leave-queue");
-      socket.emit("join-queue");
-      joinedQueueRef.current = true;
+      if (!joinedQueueRef.current || lastJoinedSocketIdRef.current !== socket.id) {
+        debugLog("[Queue] join-queue emit");
+        socket.emit("join-queue");
+        joinedQueueRef.current = true;
+        if (socket.id) {
+          lastJoinedSocketIdRef.current = socket.id;
+        }
+      }
       debugLog("[Queue] status-queue 요청");
       socket.emit("status-queue");
     };

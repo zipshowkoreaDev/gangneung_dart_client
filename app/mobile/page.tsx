@@ -1,15 +1,16 @@
 "use client";
 
-import { useEffect, useState, useCallback, useRef } from "react";
-import { socket } from "@/shared/socket";
+import { useState, useCallback } from "react";
 import { useMobileSocket } from "@/hooks/useMobileSocket";
 import { useGyroscope } from "@/hooks/useGyroscope";
 import { getQRSession } from "@/lib/session";
 import { getRoomFromUrl } from "@/lib/room";
-import { useQueue } from "./hooks/useQueue";
-import { useAimTimeout } from "./hooks/useAimTimeout";
 import { usePageLeave } from "./hooks/usePageLeave";
-import useProfanityCheck from "@/hooks/useProfanityCheck";
+import useNameInputFlow from "@/hooks/useNameInputFlow";
+import useGameLifecycle from "@/hooks/useGameLifecycle";
+import useRadiusParam from "@/hooks/useRadiusParam";
+import useQueueSessionFlow from "@/hooks/useQueueSessionFlow";
+import useStartExitFlow from "@/hooks/useStartExitFlow";
 import SessionValidating from "./components/SessionValidating";
 import AccessDenied from "./components/AccessDenied";
 import NameInput from "./components/NameInput";
@@ -17,33 +18,25 @@ import GameScreen from "./components/GameScreen";
 import ResultScreen from "./components/ResultScreen";
 import WaitingScreen from "./components/WaitingScreen";
 import QueueLoading from "./components/QueueLoading";
-import DebugOverlay, { debugLog } from "./components/DebugOverlay";
+import DebugOverlay from "./components/DebugOverlay";
 
 export default function MobilePage() {
   const [sessionValid] = useState<boolean | null>(() =>
     getQRSession() !== null ? true : false
   );
   const [room] = useState(getRoomFromUrl);
-  const [customName, setCustomName] = useState("");
-  const [rouletteRadius] = useState<number | undefined>(() => {
-    if (typeof window === "undefined") return undefined;
-    const params = new URLSearchParams(window.location.search);
-    const radiusParam = params.get("radius");
-    if (!radiusParam) return undefined;
-    const parsed = Number(radiusParam);
-    return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
-  });
+  const {
+    name: customName,
+    setName: setCustomName,
+    socketName,
+    errorMessage,
+    reset: resetName,
+  } = useNameInputFlow();
+  const rouletteRadius = useRadiusParam();
   const [isInGame, setIsInGame] = useState(false);
   const [hasJoined, setHasJoined] = useState(false);
   const [assignedSlot, setAssignedSlot] = useState<1 | 2 | null>(null);
-  const motionPermissionRef = useRef(false);
-  const startAimTimeoutRef = useRef<() => void>(() => {});
-  const nameSuffixRef = useRef("");
-  const { validateInput } = useProfanityCheck();
-
-  const socketName = customName.trim()
-    ? `${customName.trim()}#${nameSuffixRef.current}`
-    : "";
+  const [isInQueue, setIsInQueue] = useState(false);
 
   const { emitAimUpdate, emitAimOff, emitThrowDart, leaveGame } = useMobileSocket({
     room,
@@ -54,7 +47,6 @@ export default function MobilePage() {
 
   const emitAimUpdateWithTimeout = useCallback(
     (aim: { x: number; y: number }, skin?: string) => {
-      startAimTimeoutRef.current();
       emitAimUpdate(aim, skin);
     },
     [emitAimUpdate]
@@ -78,127 +70,55 @@ export default function MobilePage() {
     rouletteRadius,
   });
 
-  const handleEnterGame = useCallback((slot: 1 | 2) => {
-    debugLog(`✅ 게임 입장, 슬롯: ${slot}`);
-    setAssignedSlot(slot);
-    setHasJoined(true);
-    setIsInGame(true);
-    startSensors();
-    startAimTimeoutRef.current();
-  }, [startSensors]);
-
   const {
-    isInQueue,
     queuePosition,
     queueSnapshot,
     joinedQueueRef,
-    setIsInQueue,
-    leaveQueue,
     connectAndJoinQueue,
-  } = useQueue({
+    leaveQueue,
+  } = useQueueSessionFlow({
     room,
     name: socketName,
     isInGame,
-    onEnterGame: handleEnterGame,
-  });
-
-  const handleAimTimeout = useCallback(() => {
-    if (joinedQueueRef.current) {
-      socket.emit("leave-queue");
-      joinedQueueRef.current = false;
-    }
-    setIsInQueue(false);
-    setAssignedSlot(null);
-    setHasJoined(false);
-    setIsInGame(false);
-    setHasFinishedTurn(false);
-    leaveGame();
-    stopSensors();
-  }, [joinedQueueRef, setIsInQueue, setHasFinishedTurn, leaveGame, stopSensors]);
-
-  const { startAimTimeout } = useAimTimeout({
-    isInGame,
     hasFinishedTurn,
-    onTimeout: handleAimTimeout,
+    startSensors,
+    stopSensors,
+    leaveGame,
+    setHasFinishedTurn,
+    setAssignedSlot,
+    setHasJoined,
+    setIsInGame,
+    setIsInQueue,
   });
-
-  useEffect(() => {
-    startAimTimeoutRef.current = startAimTimeout;
-  }, [startAimTimeout]);
 
   usePageLeave({ joinedQueueRef });
 
-  useEffect(() => {
-    return () => stopSensors();
-  }, [stopSensors]);
+  useGameLifecycle({
+    isInGame,
+    throwsLeft,
+    hasFinishedTurn,
+    isInQueue,
+    setHasFinishedTurn,
+    leaveQueue,
+    stopSensors,
+  });
 
-  // 3회 던지기 완료 시 결과 화면 전환
-  useEffect(() => {
-    if (isInGame && throwsLeft === 0 && !hasFinishedTurn) {
-      setHasFinishedTurn(true);
-    }
-  }, [isInGame, throwsLeft, hasFinishedTurn, setHasFinishedTurn]);
-
-  // 게임 종료 시 대기열 이탈
-  useEffect(() => {
-    if (!hasFinishedTurn || !isInQueue) return;
-    const timer = setTimeout(() => {
-      leaveQueue();
-    }, 0);
-    return () => clearTimeout(timer);
-  }, [hasFinishedTurn, isInQueue, leaveQueue]);
-
-  const handleStart = async () => {
-    debugLog("=== handleStart ===");
-    setHasFinishedTurn(false);
-
-    const validation = validateInput(customName);
-    if (!validation.isValid) return;
-
-    if (!motionPermissionRef.current) {
-      try {
-        const hasPermission = await requestMotionPermission();
-        debugLog(`motion permission: ${hasPermission}`);
-        if (!hasPermission) return;
-        motionPermissionRef.current = true;
-      } catch (error) {
-        debugLog(`motion permission error: ${error}`);
-        return;
-      }
-    }
-
-    connectAndJoinQueue();
-  };
-
-  const handleExit = () => {
-    debugLog("=== handleExit ===");
-    setHasFinishedTurn(false);
-    setCustomName("");
-    nameSuffixRef.current = "";
-    setAssignedSlot(null);
-    setIsInGame(false);
-    setHasJoined(false);
-    leaveQueue();
-    leaveGame();
-    stopSensors();
-  };
-
-  const handleRequestPermission = useCallback(async () => {
-    try {
-      const ok = await requestMotionPermission();
-      if (ok) {
-        motionPermissionRef.current = true;
-        startSensors();
-      }
-    } catch (error) {
-      debugLog(`permission error: ${error}`);
-    }
-  }, [requestMotionPermission, startSensors]);
+  const { handleStart, handleExit, handleRequestPermission } = useStartExitFlow({
+    errorMessage,
+    requestMotionPermission,
+    connectAndJoinQueue,
+    resetName,
+    leaveQueue,
+    leaveGame,
+    stopSensors,
+    setHasFinishedTurn,
+    setIsInGame,
+    setHasJoined,
+    startSensors,
+  });
 
   const isWaitingInQueue =
     isInQueue && !isInGame && queuePosition !== null && queuePosition >= 2;
-  const nameValidation = validateInput(customName);
-
   return (
     <div className="h-screen flex flex-col items-center justify-center gap-8 bg-gradient-to-br from-[#1e3c72] to-[#2a5298] px-5">
       <DebugOverlay />
@@ -229,24 +149,9 @@ export default function MobilePage() {
       {sessionValid === true && !isInQueue && !hasFinishedTurn && !isInGame && (
         <NameInput
           name={customName}
-          onNameChange={(value) => {
-            const trimmed = value.trim();
-            if (!trimmed) {
-              setCustomName("");
-              nameSuffixRef.current = "";
-              return;
-            }
-            if (!nameSuffixRef.current) {
-              nameSuffixRef.current = Math.random().toString(36).slice(2, 6);
-            }
-            setCustomName(value);
-          }}
+          onNameChange={setCustomName}
           onStart={handleStart}
-          errorMessage={
-            customName.trim() && !nameValidation.isValid
-              ? nameValidation.message
-              : ""
-          }
+          errorMessage={errorMessage}
         />
       )}
 

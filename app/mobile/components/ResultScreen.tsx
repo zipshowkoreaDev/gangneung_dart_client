@@ -17,8 +17,8 @@ export default function ResultScreen({ name, score, onExit }: ResultScreenProps)
           {name}
         </div>
         <div className="text-center">
-          <span className="text-6xl font-bold text-[#FFD700]">{score}</span>
-          <span className="text-2xl text-white/80 ml-2">/ 3</span>
+          <span className="text-6xl font-bold text-[#FFD700]">{score}점</span>
+          <span className="text-2xl text-white/80 ml-2">/ 3번 중</span>
         </div>
         <div className="text-center text-white/50 text-sm mt-4">
           {score === 3

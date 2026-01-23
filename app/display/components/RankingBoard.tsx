@@ -14,7 +14,7 @@ export default function RankingBoard({ rankings }: RankingBoardProps) {
       </div>
       {rankings.length === 0 ? (
         <div className="bg-white/50 backdrop-blur-sm rounded-lg px-3 py-2 min-w-[140px] text-center">
-          <span className="text-white/50 text-xs">기록 없음</span>
+          <span className="text-xs">기록 없음</span>
         </div>
       ) : (
         rankings.map((entry, index) => (
