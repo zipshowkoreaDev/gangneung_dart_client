@@ -141,7 +141,7 @@ export function useMobileSocket({
   );
 
   const emitThrowDart = useCallback(
-    (payload: { aim: { x: number; y: number }; score: number }) => {
+    (payload: { aim: { x: number; y: number }; score: number; zone?: string }) => {
       if (!socket.connected || !slotRef.current) return;
       const playerRoom = getPlayerRoom(room, slotRef.current);
       socket.emit("throw-dart", {
@@ -150,6 +150,7 @@ export function useMobileSocket({
         name,
         aim: payload.aim,
         score: payload.score,
+        zone: payload.zone,
       });
 
       throwCountRef.current += 1;

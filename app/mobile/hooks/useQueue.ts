@@ -5,7 +5,6 @@ import { socket } from "@/shared/socket";
 import { getSlotFromPosition } from "@/lib/room";
 import { debugLog } from "../components/DebugOverlay";
 
-const ACTIVE_TAB_KEY = "dart.activeTabId";
 const QUEUE_TIMEOUT_MS = 2 * 60 * 1000;
 
 interface UseQueueProps {
@@ -37,9 +36,7 @@ export function useQueue({
   const [queueSnapshot, setQueueSnapshot] = useState<string[] | null>(null);
   const joinedQueueRef = useRef(false);
   const lastRejoinAtRef = useRef(0);
-  const tabIdRef = useRef("");
   const queueStartAtRef = useRef<number | null>(null);
-  const hasActiveTabRef = useRef(true);
 
   const leaveQueue = useCallback(() => {
     if (joinedQueueRef.current) {
@@ -54,10 +51,6 @@ export function useQueue({
   }, []);
 
   const connectAndJoinQueue = useCallback(() => {
-    if (!hasActiveTabRef.current) {
-      debugLog("[Queue] 다른 탭이 활성화됨 - join-queue 차단");
-      return;
-    }
     if (!socket.connected) {
       debugLog("[Socket] 연결 시도...");
       socket.io.opts.query = { room, name };
@@ -160,58 +153,7 @@ export function useQueue({
       socket.off("error", onError);
       socket.off("status-queue", onStatusQueue);
     };
-  }, [isInQueue, isInGame, name, onEnterGame, room]);
-
-  useEffect(() => {
-    const existing = localStorage.getItem(ACTIVE_TAB_KEY);
-    if (!existing) {
-      const newId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      localStorage.setItem(ACTIVE_TAB_KEY, newId);
-      tabIdRef.current = newId;
-      hasActiveTabRef.current = true;
-    } else {
-      tabIdRef.current = existing;
-      hasActiveTabRef.current = true;
-    }
-
-    const onStorage = (event: StorageEvent) => {
-      if (event.key !== ACTIVE_TAB_KEY) return;
-      if (!event.newValue) {
-        const newId = `${Date.now()}-${Math.random()
-          .toString(36)
-          .slice(2, 8)}`;
-        localStorage.setItem(ACTIVE_TAB_KEY, newId);
-        tabIdRef.current = newId;
-        hasActiveTabRef.current = true;
-        return;
-      }
-
-      if (event.newValue !== tabIdRef.current) {
-        hasActiveTabRef.current = false;
-        if (joinedQueueRef.current) {
-          debugLog("[Queue] 다른 탭 활성 - 자동 이탈");
-          leaveQueue();
-        }
-      }
-    };
-
-    const onBeforeUnload = () => {
-      if (localStorage.getItem(ACTIVE_TAB_KEY) === tabIdRef.current) {
-        localStorage.removeItem(ACTIVE_TAB_KEY);
-      }
-    };
-
-    window.addEventListener("storage", onStorage);
-    window.addEventListener("beforeunload", onBeforeUnload);
-
-    return () => {
-      window.removeEventListener("storage", onStorage);
-      window.removeEventListener("beforeunload", onBeforeUnload);
-      if (localStorage.getItem(ACTIVE_TAB_KEY) === tabIdRef.current) {
-        localStorage.removeItem(ACTIVE_TAB_KEY);
-      }
-    };
-  }, [leaveQueue]);
+  }, [isInQueue, isInGame, name, onEnterGame, room, leaveQueue]);
 
   return {
     isInQueue,

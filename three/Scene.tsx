@@ -1,9 +1,54 @@
 "use client";
 
-import { useRef, useState, useEffect } from "react";
+import { useRef, useState, useEffect, useMemo } from "react";
 import { OrbitControls, useGLTF } from "@react-three/drei";
 import { useFrame, useThree } from "@react-three/fiber";
 import * as THREE from "three";
+
+export type HitZone = "bull" | "single" | "triple" | "double" | "miss";
+
+interface HitResult {
+  zone: HitZone;
+  score: number;
+}
+
+// 다트판 구역 비율 (중심 기준)
+const ZONE_RATIOS = {
+  BULL: 0.08,
+  INNER_SINGLE: 0.47,
+  TRIPLE: 0.54,
+  OUTER_SINGLE: 0.93,
+  DOUBLE: 1.0,
+};
+
+const SCORES = {
+  BULL: 50,
+  SINGLE: 10,
+  TRIPLE: 30,
+  DOUBLE: 20,
+  MISS: 0,
+};
+
+function getHitResult(distance: number, rouletteRadius: number): HitResult {
+  const ratio = distance / rouletteRadius;
+
+  if (ratio <= ZONE_RATIOS.BULL) {
+    return { zone: "bull", score: SCORES.BULL };
+  }
+  if (ratio <= ZONE_RATIOS.INNER_SINGLE) {
+    return { zone: "single", score: SCORES.SINGLE };
+  }
+  if (ratio <= ZONE_RATIOS.TRIPLE) {
+    return { zone: "triple", score: SCORES.TRIPLE };
+  }
+  if (ratio <= ZONE_RATIOS.OUTER_SINGLE) {
+    return { zone: "single", score: SCORES.SINGLE };
+  }
+  if (ratio <= ZONE_RATIOS.DOUBLE) {
+    return { zone: "double", score: SCORES.DOUBLE };
+  }
+  return { zone: "miss", score: SCORES.MISS };
+}
 
 interface StuckDartProps {
   position: [number, number, number];
@@ -33,7 +78,6 @@ function FlyingDart({ targetPosition, onComplete }: FlyingDartProps) {
   const { scene } = useGLTF("/models/dart.glb");
   const [progress, setProgress] = useState(0);
 
-  // 시작 위치 (화면 앞쪽, 아래쪽)
   const startPosition: [number, number, number] = [
     targetPosition[0],
     targetPosition[1],
@@ -43,7 +87,6 @@ function FlyingDart({ targetPosition, onComplete }: FlyingDartProps) {
   useFrame((_, delta) => {
     if (!groupRef.current) return;
 
-    // 진행도 업데이트 (1초 동안 날아감)
     setProgress((prev) => {
       const next = prev + delta * 1.5; // 속도 조절
       if (next >= 1) {
@@ -53,7 +96,6 @@ function FlyingDart({ targetPosition, onComplete }: FlyingDartProps) {
       return next;
     });
 
-    // lerp로 위치 보간
     groupRef.current.position.x = THREE.MathUtils.lerp(
       startPosition[0],
       targetPosition[0],
@@ -70,7 +112,6 @@ function FlyingDart({ targetPosition, onComplete }: FlyingDartProps) {
       progress
     );
 
-    // 날아가는 동안 빠르게 회전
     groupRef.current.rotation.y += delta * 3;
   });
 
@@ -97,6 +138,8 @@ interface FlyingDartData {
   ownerKey: string;
 }
 
+let cachedRouletteRadius = 20;
+
 function RotatingRoulette({
   flyingDarts,
   stuckDarts,
@@ -107,18 +150,21 @@ function RotatingRoulette({
   const groupRef = useRef<THREE.Group>(null);
   const { scene } = useGLTF("/models/roulette.glb");
 
-  // 시계 방향으로 천천히 회전
+  useMemo(() => {
+    const box = new THREE.Box3().setFromObject(scene);
+    const size = box.getSize(new THREE.Vector3());
+    cachedRouletteRadius = Math.max(size.x, size.y) / 2;
+  }, [scene]);
+
   useFrame((_, delta) => {
     if (!groupRef.current) return;
-    // Z축 기준 회전
-    groupRef.current.rotation.z -= delta * 0.3; // 0.3은 회전 속도 (조절 가능)
+    groupRef.current.rotation.z -= delta * 0.3;
   });
 
   return (
     <group ref={groupRef}>
       <primitive object={scene} rotation={[0, -Math.PI / 2, 0]} scale={1} />
 
-      {/* 날아가는 다트들 */}
       {flyingDarts.map((dart) => (
         <FlyingDart
           key={dart.id}
@@ -127,12 +173,15 @@ function RotatingRoulette({
         />
       ))}
 
-      {/* 꽂힌 다트들 */}
       {stuckDarts.map((dart) => (
         <StuckDart key={dart.id} position={dart.position} />
       ))}
     </group>
   );
+}
+
+export function getRouletteRadius(): number {
+  return cachedRouletteRadius;
 }
 
 function DartEventHandler({
@@ -149,17 +198,13 @@ function DartEventHandler({
 
       if (!data.aim) return;
 
-      const { x, y } = data.aim; // -1..1 범위 (NDC)
+      const { x, y } = data.aim;
 
-      // Raycaster로 화면 좌표를 3D 좌표로 변환
       const raycaster = new THREE.Raycaster();
       const mouse = new THREE.Vector2(x, y);
-
-      // 카메라에서 마우스 위치로 ray 설정
       raycaster.setFromCamera(mouse, camera);
 
-      // 룰렛 평면 (z = 1)과 교차점 계산
-      const plane = new THREE.Plane(new THREE.Vector3(0, 0, 1), -1); // z = 1 평면
+      const plane = new THREE.Plane(new THREE.Vector3(0, 0, 1), -1);
       const intersectPoint = new THREE.Vector3();
       raycaster.ray.intersectPlane(plane, intersectPoint);
 
@@ -212,17 +257,11 @@ export default function Scene() {
   ) => {
     const dartId = `${Date.now()}-${Math.random()}`;
 
-    // 먼저 날아가는 다트로 추가
     setFlyingDarts((prev) => [
       ...prev,
-      {
-        id: dartId,
-        position,
-        ownerKey,
-      },
+      { id: dartId, position, ownerKey },
     ]);
 
-    // 애니메이션 시간 후 꽂힌 다트로 이동
     setTimeout(() => {
       setFlyingDarts((prev) => prev.filter((d) => d.id !== dartId));
       setStuckDarts((prev) => [
@@ -239,34 +278,15 @@ export default function Scene() {
 
       {/* 기본 조명 - 전체 밝기 */}
       <ambientLight intensity={1.5} color={"white"} />
-
-      {/* 왼쪽 directionalLight */}
-      <directionalLight
-        position={[-20, 0, 20]}
-        intensity={1.5}
-        color="#ffffff"
-      />
-
-      {/* 오른쪽 directionalLight */}
-      <directionalLight
-        position={[20, 0, 20]}
-        intensity={1.5}
-        color="#ffffff"
-      />
-
-      {/* 상단 전체 조명 */}
+      <directionalLight position={[-20, 0, 20]} intensity={1.5} color="#ffffff" />
+      <directionalLight position={[20, 0, 20]} intensity={1.5} color="#ffffff" />
       <directionalLight position={[0, 20, 15]} intensity={1.5} />
 
-      {/* 룰렛 모델 */}
       <RotatingRoulette flyingDarts={flyingDarts} stuckDarts={stuckDarts} />
-
-      {/* 개발용 – 현장 배포 전 제거 */}
       <OrbitControls enableZoom={false} />
     </>
   );
 }
 
-// 룰렛 모델 프리로드
 useGLTF.preload("/models/roulette.glb");
-// 다트 모델 프리로드
 useGLTF.preload("/models/dart.glb");

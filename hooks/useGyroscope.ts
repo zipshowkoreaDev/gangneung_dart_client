@@ -7,7 +7,40 @@ const THROW_COOLDOWN_MS = 700;
 const AIM_HZ = 30;
 const AIM_INTERVAL = 1000 / AIM_HZ;
 const BASELINE_SAMPLES = 12;
-const HIT_RADIUS = 0.6;
+
+// 3D 좌표 변환 상수
+const CAMERA_Z = 50;
+const PLANE_Z = 1;
+const FOV = 50;
+const CAMERA_DISTANCE = CAMERA_Z - PLANE_Z;
+const HALF_FOV_RAD = (FOV / 2) * (Math.PI / 180);
+const AIM_TO_3D_SCALE = CAMERA_DISTANCE * Math.tan(HALF_FOV_RAD);
+
+const DEFAULT_ROULETTE_RADIUS = 8.105359363722414;
+
+// 다트판 구역 비율 (중심 기준)
+const ZONE_RATIOS = {
+  BULL: 0.08,
+  INNER_SINGLE: 0.47,
+  TRIPLE: 0.54,
+  OUTER_SINGLE: 0.93,
+  DOUBLE: 1.0,
+};
+
+const SCORES = {
+  BULL: 50,
+  SINGLE: 10,
+  TRIPLE: 30,
+  DOUBLE: 20,
+  MISS: 0,
+};
+
+export type HitZone = "bull" | "single" | "triple" | "double" | "miss";
+
+interface HitResult {
+  zone: HitZone;
+  score: number;
+}
 
 interface UseGyroscopeProps {
   emitAimUpdate: (aim: { x: number; y: number }, skin?: string) => void;
@@ -15,24 +48,58 @@ interface UseGyroscopeProps {
   emitThrowDart: (payload: {
     aim: { x: number; y: number };
     score: number;
+    zone: HitZone;
   }) => void;
+  rouletteRadius?: number;
 }
 
 function clamp(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n));
 }
 
-function getHitScore(aim: { x: number; y: number }) {
-  const x = clamp(aim.x, -1, 1);
-  const y = clamp(aim.y, -1, 1);
-  return Math.hypot(x, y) <= HIT_RADIUS ? 1 : 0;
+function aimTo3D(aim: { x: number; y: number }): { x: number; y: number } {
+  return {
+    x: aim.x * AIM_TO_3D_SCALE,
+    y: aim.y * AIM_TO_3D_SCALE,
+  };
+}
+
+function getHitResult(
+  aim: { x: number; y: number },
+  rouletteRadius: number
+): HitResult {
+  const pos3D = aimTo3D(aim);
+  const distance = Math.hypot(pos3D.x, pos3D.y);
+  const ratio = distance / rouletteRadius;
+
+  if (ratio <= ZONE_RATIOS.BULL) {
+    return { zone: "bull", score: SCORES.BULL };
+  }
+  if (ratio <= ZONE_RATIOS.INNER_SINGLE) {
+    return { zone: "single", score: SCORES.SINGLE };
+  }
+  if (ratio <= ZONE_RATIOS.TRIPLE) {
+    return { zone: "triple", score: SCORES.TRIPLE };
+  }
+  if (ratio <= ZONE_RATIOS.OUTER_SINGLE) {
+    return { zone: "single", score: SCORES.SINGLE };
+  }
+  if (ratio <= ZONE_RATIOS.DOUBLE) {
+    return { zone: "double", score: SCORES.DOUBLE };
+  }
+  return { zone: "miss", score: SCORES.MISS };
 }
 
 export function useGyroscope({
   emitAimUpdate,
   emitAimOff,
   emitThrowDart,
+  rouletteRadius,
 }: UseGyroscopeProps) {
+  const currentRouletteRadius =
+    typeof rouletteRadius === "number" && rouletteRadius > 0
+      ? rouletteRadius
+      : DEFAULT_ROULETTE_RADIUS;
   const [aimPosition, setAimPosition] = useState({ x: 0, y: 0 });
   const [sensorsReady, setSensorsReady] = useState(false);
   const [sensorError, setSensorError] = useState("");
@@ -231,18 +298,18 @@ export function useGyroscope({
         readyRef.current = false;
         throwBlockedUntilRef.current = now + THROW_COOLDOWN_MS;
 
-        const hitScore = getHitScore(aimRef.current);
-        setMyScore((prev) => prev + hitScore);
+        const hitResult = getHitResult(aimRef.current, currentRouletteRadius);
+        setMyScore((prev) => prev + hitResult.score);
 
         emitThrowDart({
           aim: aimRef.current,
-          score: hitScore,
+          score: hitResult.score,
+          zone: hitResult.zone,
         });
         throwCountRef.current += 1;
         setThrowsLeft((prev) => Math.max(0, prev - 1));
         if (throwCountRef.current >= 3) {
           setHasFinishedTurn(true);
-          // 3초 후에 센서 중지 및 나가기 (결과 화면 표시 시간)
           setTimeout(() => {
             stopSensors();
           }, 3000);
@@ -262,7 +329,7 @@ export function useGyroscope({
 
     window.addEventListener("deviceorientation", handleOrientationRef.current);
     window.addEventListener("devicemotion", handleMotionRef.current);
-  }, [stopSensors, emitAimUpdate, emitThrowDart]);
+  }, [stopSensors, emitAimUpdate, emitThrowDart, currentRouletteRadius]);
 
   return {
     aimPosition,

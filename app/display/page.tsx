@@ -1,11 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { useDisplaySocket } from "@/hooks/useDisplaySocket";
 import { generateSessionToken } from "@/lib/session";
 import Scoreboard, { PlayerScore } from "./components/Scoreboard";
 import AimOverlay from "./components/AimOverlay";
+import { getRouletteRadius } from "@/three/Scene";
 const DisplayQRCode = dynamic(() => import("./components/DisplayQRCode"), {
   ssr: false,
 });
@@ -25,14 +26,40 @@ export default function DisplayPage() {
     () => new Map()
   );
 
-  const [mobileUrl] = useState(() => {
-    if (typeof window === "undefined") return "";
+  const tokenRef = useRef<string | null>(null);
+  const [mobileUrl, setMobileUrl] = useState("");
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    if (!tokenRef.current) {
+      tokenRef.current = generateSessionToken();
+    }
 
     const baseUrl = `${window.location.protocol}//${window.location.host}`;
-    const token = generateSessionToken();
-    const url = `${baseUrl}/auth/${token}?room=${ROOM}`;
-    return url;
-  });
+    const buildUrl = (radius?: number) => {
+      const params = new URLSearchParams({ room: ROOM });
+      if (typeof radius === "number" && radius > 0) {
+        params.set("radius", radius.toString());
+      }
+      setMobileUrl(`${baseUrl}/auth/${tokenRef.current}?${params.toString()}`);
+    };
+
+    buildUrl();
+
+    let lastRadius = 0;
+    const intervalId = window.setInterval(() => {
+      const radius = getRouletteRadius();
+      if (!Number.isFinite(radius) || radius <= 0) return;
+      const rounded = Math.round(radius * 1_000_000) / 1_000_000;
+      if (rounded !== lastRadius) {
+        lastRadius = rounded;
+        buildUrl(rounded);
+      }
+    }, 1000);
+
+    return () => window.clearInterval(intervalId);
+  }, []);
 
   useDisplaySocket({
     room: ROOM,

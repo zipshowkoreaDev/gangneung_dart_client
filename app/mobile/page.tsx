@@ -25,6 +25,14 @@ export default function MobilePage() {
   );
   const [room] = useState(getRoomFromUrl);
   const [customName, setCustomName] = useState("");
+  const [rouletteRadius] = useState<number | undefined>(() => {
+    if (typeof window === "undefined") return undefined;
+    const params = new URLSearchParams(window.location.search);
+    const radiusParam = params.get("radius");
+    if (!radiusParam) return undefined;
+    const parsed = Number(radiusParam);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
+  });
   const [isInGame, setIsInGame] = useState(false);
   const [hasJoined, setHasJoined] = useState(false);
   const [assignedSlot, setAssignedSlot] = useState<1 | 2 | null>(null);
@@ -67,6 +75,7 @@ export default function MobilePage() {
     emitAimUpdate: emitAimUpdateWithTimeout,
     emitAimOff,
     emitThrowDart,
+    rouletteRadius,
   });
 
   const handleEnterGame = useCallback((slot: 1 | 2) => {
