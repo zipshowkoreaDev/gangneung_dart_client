@@ -242,7 +242,10 @@ export function useGyroscope({
         setThrowsLeft((prev) => Math.max(0, prev - 1));
         if (throwCountRef.current >= 3) {
           setHasFinishedTurn(true);
-          stopSensors();
+          // 3초 후에 센서 중지 및 나가기 (결과 화면 표시 시간)
+          setTimeout(() => {
+            stopSensors();
+          }, 3000);
           return;
         }
 

@@ -19,6 +19,12 @@ export function getSlotFromUrl(): 1 | 2 | null {
   return null;
 }
 
+export function getSlotFromPosition(position: number): 1 | 2 | null {
+  if (position === 0) return 1;
+  if (position === 1) return 2;
+  return null;
+}
+
 export function getPlayerRoom(baseRoom: string, playerSlot: 1 | 2): string {
   return `game-${baseRoom}-player${playerSlot}`;
 }

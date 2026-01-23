@@ -23,9 +23,6 @@ export function debugLog(message: string) {
     message,
   };
 
-  // 기존 console.log도 유지
-  console.log(message);
-
   // 리스너들에게 알림
   logListeners.forEach((listener) => listener(entry));
 }

@@ -34,7 +34,7 @@ export default function Scoreboard({
           {player?.score ? `${player?.score} 점` : ""}
         </div>
         <div className="text-[0.75rem] opacity-70">
-          {player?.totalThrows ? `${player?.totalThrows}회 던짐` : ""}
+          {player ? `남은 기회: ${3 - player.totalThrows}` : ""}
         </div>
       </div>
     );
