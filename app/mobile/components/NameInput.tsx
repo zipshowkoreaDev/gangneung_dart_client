@@ -3,6 +3,8 @@ interface NameInputProps {
   onNameChange: (name: string) => void;
   onStart: () => void;
   errorMessage?: string;
+  helperText?: string;
+  isChecking?: boolean;
 }
 
 // 게임 시작 전 이름 입력 화면
@@ -11,6 +13,8 @@ export default function NameInput({
   onNameChange,
   onStart,
   errorMessage,
+  helperText,
+  isChecking,
 }: NameInputProps) {
   return (
     <div className="flex flex-col items-center gap-8">
@@ -30,14 +34,17 @@ export default function NameInput({
         {errorMessage && (
           <div className="text-sm text-red-200 text-center">{errorMessage}</div>
         )}
+        {!errorMessage && helperText && (
+          <div className="text-sm text-white/80 text-center">{helperText}</div>
+        )}
       </div>
 
       <button
         onClick={onStart}
-        disabled={!name.trim() || Boolean(errorMessage)}
+        disabled={!name.trim() || Boolean(errorMessage) || Boolean(isChecking)}
         className="py-5 px-10 text-2xl font-bold rounded-2xl border-none bg-gradient-to-br from-[#FFD700] to-[#FFA500] text-black shadow-[0_8px_32px_rgba(255,215,0,0.4)] disabled:opacity-40 disabled:cursor-not-allowed disabled:shadow-none transition-all"
       >
-        시작하기
+        {isChecking ? "수평 확인 중..." : "시작하기"}
       </button>
     </div>
   );

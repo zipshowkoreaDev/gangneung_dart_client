@@ -27,3 +27,19 @@ body {
   -ms-overflow-style: none;
   scrollbar-width: none;
 }
+
+@keyframes level-bubble {
+  0% {
+    transform: translate(-50%, -50%) translateX(-10px);
+  }
+  50% {
+    transform: translate(-50%, -50%) translateX(10px);
+  }
+  100% {
+    transform: translate(-50%, -50%) translateX(-10px);
+  }
+}
+
+.level-bubble {
+  animation: level-bubble 1.4s ease-in-out infinite;
+}

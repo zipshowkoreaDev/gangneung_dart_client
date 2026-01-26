@@ -130,6 +130,8 @@ export function useGyroscope({
     ((e: DeviceOrientationEvent) => void) | null
   >(null);
   const handleMotionRef = useRef<((e: DeviceMotionEvent) => void) | null>(null);
+  const smoothedXRef = useRef(0);
+  const prevAlphaDeltaRef = useRef(0);
 
   const norm = (v: number, a: number, b: number) =>
     Math.max(-1, Math.min(1, ((v - a) / (b - a)) * 2 - 1));
@@ -229,14 +231,16 @@ export function useGyroscope({
     baselineSamplesRef.current = 0;
     prevMagRef.current = 0;
     throwBlockedUntilRef.current = 0;
+    smoothedXRef.current = 0;
+    prevAlphaDeltaRef.current = 0;
 
     const isIOS =
       typeof navigator !== "undefined" &&
       /iPad|iPhone|iPod/.test(navigator.userAgent);
     isIOSRef.current = isIOS;
-    const gammaRange = isIOS ? 20 : 35;
-    const betaRange = isIOS ? 20 : 35;
-    const alphaRange = 25;
+    const gammaRange = isIOS ? 35 : 35;
+    const betaRange = isIOS ? 35 : 35;
+    const alphaRange = isIOS ? 40 : 25;
     if (isIOS) {
       faceUpRef.current = true;
     }
@@ -277,7 +281,21 @@ export function useGyroscope({
 
       // 눕힌 상태(화면이 천장)에서는 yaw(alpha)을 X, roll(gamma)을 Y로 사용
       if (faceUpRef.current) {
-        x = norm(a, -alphaRange, alphaRange);
+        // alpha 급격한 변화 감지 (gimbal lock 방지)
+        const alphaDelta = Math.abs(a - prevAlphaDeltaRef.current);
+        prevAlphaDeltaRef.current = a;
+
+        let rawX = -norm(a, -alphaRange, alphaRange);
+
+        // 급격한 변화(90도 이상) 시 이전 값 유지
+        if (alphaDelta > 90) {
+          rawX = smoothedXRef.current;
+        }
+
+        // smoothing 적용 (0.3 = 새 값 30%, 이전 값 70%)
+        smoothedXRef.current = smoothedXRef.current * 0.7 + rawX * 0.3;
+        x = smoothedXRef.current;
+
         y0 = norm(g, -gammaRange, gammaRange);
       }
 

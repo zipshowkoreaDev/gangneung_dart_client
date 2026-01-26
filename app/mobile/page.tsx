@@ -19,6 +19,7 @@ import ResultScreen from "./components/ResultScreen";
 import WaitingScreen from "./components/WaitingScreen";
 import QueueLoading from "./components/QueueLoading";
 import DebugOverlay from "./components/DebugOverlay";
+import LevelCheckOverlay from "./components/LevelCheckOverlay";
 
 export default function MobilePage() {
   const [sessionValid] = useState<boolean | null>(() =>
@@ -37,6 +38,14 @@ export default function MobilePage() {
   const [hasJoined, setHasJoined] = useState(false);
   const [assignedSlot, setAssignedSlot] = useState<1 | 2 | null>(null);
   const [isInQueue, setIsInQueue] = useState(false);
+  const [startError, setStartError] = useState("");
+  const [startStatus, setStartStatus] = useState<"idle" | "checking-level">(
+    "idle"
+  );
+  const [levelSample, setLevelSample] = useState<{
+    beta: number;
+    gamma: number;
+  } | null>(null);
 
   const { emitAimUpdate, emitAimOff, emitThrowDart, leaveGame } = useMobileSocket({
     room,
@@ -103,8 +112,16 @@ export default function MobilePage() {
     stopSensors,
   });
 
-  const { handleStart, handleExit, handleRequestPermission } = useStartExitFlow({
+  const {
+    handleStart,
+    handleCancelLevelCheck,
+    handleExit,
+    handleRequestPermission,
+  } = useStartExitFlow({
     errorMessage,
+    setStartError,
+    setStartStatus,
+    setLevelSample,
     requestMotionPermission,
     connectAndJoinQueue,
     resetName,
@@ -117,11 +134,26 @@ export default function MobilePage() {
     startSensors,
   });
 
+  const handleNameChange = useCallback(
+    (value: string) => {
+      if (startError) setStartError("");
+      setCustomName(value);
+    },
+    [setCustomName, startError]
+  );
+
   const isWaitingInQueue =
     isInQueue && !isInGame && queuePosition !== null && queuePosition >= 2;
   return (
     <div className="h-screen flex flex-col items-center justify-center gap-8 bg-gradient-to-br from-[#1e3c72] to-[#2a5298] px-5">
       <DebugOverlay />
+      {startStatus === "checking-level" && (
+        <LevelCheckOverlay
+          sample={levelSample}
+          threshold={5}
+          onCancel={handleCancelLevelCheck}
+        />
+      )}
       {sessionValid === null && <SessionValidating />}
       {sessionValid === false && <AccessDenied />}
 
@@ -149,9 +181,11 @@ export default function MobilePage() {
       {sessionValid === true && !isInQueue && !hasFinishedTurn && !isInGame && (
         <NameInput
           name={customName}
-          onNameChange={setCustomName}
+          onNameChange={handleNameChange}
           onStart={handleStart}
-          errorMessage={errorMessage}
+          errorMessage={errorMessage || startError}
+          helperText={startStatus === "checking-level" ? "수평 확인 중..." : ""}
+          isChecking={startStatus === "checking-level"}
         />
       )}
 

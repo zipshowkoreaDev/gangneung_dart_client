@@ -58,7 +58,7 @@ npm run dev
 ### 모바일
 
 ```
-이름 입력 → 대기열(join-queue) → 슬롯 배정 → 게임 방 입장(joinRoom)
+이름 입력 → 모션 권한 → 수평 체크(±5°, 1초 유지) → 대기열(join-queue) → 슬롯 배정 → 게임 방 입장(joinRoom)
          → 조준(aim-update) → 던짐(throw-dart) → 종료(aim-off)
 ```
 
@@ -114,6 +114,7 @@ npm run dev
 - 재연결 시 큐 재정합 (`leave-queue` → `join-queue`)
 - 하트비트로 `status-queue` 주기 요청
 - 대기열 타임아웃 (기본 2분) 자동 이탈
+- 큐 입장 전 수평 체크 오버레이 (±5° 유지 1초 통과, 취소 시 큐 미진입)
 
 ---
 
