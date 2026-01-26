@@ -13,6 +13,7 @@ import {
   getHitScoreFromAim as getHitScoreFromAimBase,
   DEFAULT_ROULETTE_RADIUS,
 } from "@/lib/score";
+import { isAimInsideDisplayBounds } from "@/lib/displayAimBounds";
 
 type AimState = Map<string, { x: number; y: number; skin?: string }>;
 
@@ -184,7 +185,8 @@ export function useDisplaySocket({
         return;
       }
 
-      const score = getHitScoreFromAim(data.aim);
+      const isInsideBounds = isAimInsideDisplayBounds(data.aim);
+      const score = isInsideBounds ? getHitScoreFromAim(data.aim) : 0;
       const hitSound = new Audio("/sound/hit.mp3");
       hitSound.play().catch((e) => {
         onLog?.(`Sound play failed: ${String(e)}`);

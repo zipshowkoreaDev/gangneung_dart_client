@@ -9,11 +9,11 @@ const AIM_TO_3D_SCALE = CAMERA_DISTANCE * Math.tan(HALF_FOV_RAD);
 export const DEFAULT_ROULETTE_RADIUS = 8.105359363722414;
 
 export const ZONE_RATIOS = {
-  BULL: 0.08,
-  INNER_SINGLE: 0.47,
-  TRIPLE: 0.54,
-  OUTER_SINGLE: 0.93,
-  DOUBLE: 1.0,
+  BULL: 0.15,
+  INNER_SINGLE: 0.6,
+  TRIPLE: 0.725,
+  OUTER_SINGLE: 0.9,
+  DOUBLE: 0.98,
 } as const;
 
 export const SCORES = {
