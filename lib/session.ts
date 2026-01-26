@@ -12,7 +12,7 @@ export function setQRSession(token: string): void {
   try {
     sessionStorage.setItem(SESSION_KEY, token);
     sessionStorage.setItem(SESSION_TIMESTAMP_KEY, Date.now().toString());
-  } catch (error) {
+  } catch {
   }
 }
 
@@ -38,7 +38,7 @@ export function getQRSession(): string | null {
     }
 
     return token;
-  } catch (error) {
+  } catch {
     return null;
   }
 }
@@ -50,7 +50,7 @@ export function clearQRSession(): void {
   try {
     sessionStorage.removeItem(SESSION_KEY);
     sessionStorage.removeItem(SESSION_TIMESTAMP_KEY);
-  } catch (error) {
+  } catch {
   }
 }
 

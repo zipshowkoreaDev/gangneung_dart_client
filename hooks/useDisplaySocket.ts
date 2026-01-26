@@ -8,6 +8,11 @@ import {
 import { socket } from "@/shared/socket";
 import { getDisplayRoom, getAllPlayerRooms } from "@/lib/room";
 import { getRouletteRadius } from "@/three/Scene";
+import {
+  clamp,
+  getHitScoreFromAim as getHitScoreFromAimBase,
+  DEFAULT_ROULETTE_RADIUS,
+} from "@/lib/score";
 
 type AimState = Map<string, { x: number; y: number; skin?: string }>;
 
@@ -34,42 +39,6 @@ interface UseDisplaySocketProps {
   onPlayerFinish?: (name: string, score: number) => void;
 }
 
-function clamp(n: number, min: number, max: number) {
-  return Math.max(min, Math.min(max, n));
-}
-
-// 점수 계산 상수 (모바일과 동일)
-const CAMERA_Z = 50;
-const PLANE_Z = 1;
-const FOV = 50;
-const CAMERA_DISTANCE = CAMERA_Z - PLANE_Z;
-const HALF_FOV_RAD = (FOV / 2) * (Math.PI / 180);
-const AIM_TO_3D_SCALE = CAMERA_DISTANCE * Math.tan(HALF_FOV_RAD);
-const DEFAULT_ROULETTE_RADIUS = 8.105359363722414;
-
-const ZONE_RATIOS = {
-  BULL: 0.08,
-  INNER_SINGLE: 0.47,
-  TRIPLE: 0.54,
-  OUTER_SINGLE: 0.93,
-  DOUBLE: 1.0,
-};
-
-const SCORES = {
-  BULL: 50,
-  SINGLE: 10,
-  TRIPLE: 30,
-  DOUBLE: 20,
-  MISS: 0,
-};
-
-function aimTo3D(aim: { x: number; y: number }): { x: number; y: number } {
-  return {
-    x: aim.x * AIM_TO_3D_SCALE,
-    y: aim.y * AIM_TO_3D_SCALE,
-  };
-}
-
 function getCurrentRouletteRadius(): number {
   const radius = getRouletteRadius();
   if (Number.isFinite(radius) && radius > 0) {
@@ -79,20 +48,7 @@ function getCurrentRouletteRadius(): number {
 }
 
 function getHitScoreFromAim(aim?: { x: number; y: number }): number {
-  if (!aim) return 0;
-  const pos3D = aimTo3D({
-    x: clamp(aim.x, -1, 1),
-    y: clamp(aim.y, -1, 1),
-  });
-  const distance = Math.hypot(pos3D.x, pos3D.y);
-  const ratio = distance / getCurrentRouletteRadius();
-
-  if (ratio <= ZONE_RATIOS.BULL) return SCORES.BULL;
-  if (ratio <= ZONE_RATIOS.INNER_SINGLE) return SCORES.SINGLE;
-  if (ratio <= ZONE_RATIOS.TRIPLE) return SCORES.TRIPLE;
-  if (ratio <= ZONE_RATIOS.OUTER_SINGLE) return SCORES.SINGLE;
-  if (ratio <= ZONE_RATIOS.DOUBLE) return SCORES.DOUBLE;
-  return SCORES.MISS;
+  return getHitScoreFromAimBase(aim, getCurrentRouletteRadius());
 }
 
 function resolvePlayerKey(data: {
